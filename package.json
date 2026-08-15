@@ -1,0 +1,20 @@
+{
+  "name": "mission-control",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "An installable LAN homepage for locally-hosted services and everyday websites — live status and uptime history, groups, pinned favorites, connections between services, a shared file browser, and a quick-launch omnibox.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "multer": "^2.0.0",
+    "ws": "^8.21.3"
+  }
+}

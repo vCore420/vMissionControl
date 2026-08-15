@@ -22,6 +22,7 @@ const state = {
   activeChannelId: null,
   chatMessages: new Map(),
   chatUnseen: 0,
+  highlightedServiceId: null,
 };
 
 const cardsById = new Map();
@@ -240,10 +241,11 @@ function renderUptimeStrip(card, status) {
   card.querySelector('.uptime-percent').textContent = status?.uptimePercent != null ? `${status.uptimePercent}%` : '—';
 }
 
-function buildCardElement(service) {
+function buildCardElement(service, adjacency) {
   const group = groupById(service.group);
   const status = state.status.get(service.id);
   const sl = statusLabel(status);
+  const connectionCount = (adjacency.get(service.id) || new Set()).size;
 
   const favicon = service.icon ? null : faviconUrl(service.url);
   const iconMarkup = service.icon
@@ -270,6 +272,7 @@ function buildCardElement(service) {
       <div class="card-meta">
         <span class="status-text">${sl.text}</span>
         ${group ? `<span class="card-group-badge" style="background:${group.color}22;color:${group.color}">${escapeHtml(group.name)}</span>` : ''}
+        ${connectionCount > 0 ? `<span class="connection-badge" title="Connected to ${connectionCount} other service${connectionCount > 1 ? 's' : ''} — tap this card to see which">🔗 ${connectionCount}</span>` : ''}
       </div>
       <div class="uptime-row">
         <div class="uptime-strip"></div>
@@ -336,11 +339,17 @@ function buildCardElement(service) {
     }
   });
 
-  card.addEventListener('mouseenter', () => {
-    const adjacency = buildAdjacency(state.config.connections);
-    highlightNeighbors(cardsById, adjacency, service.id);
+  // Click-to-toggle rather than hover: hover doesn't fire on touch devices
+  // at all, so a mouse-only interaction here would make this invisible on
+  // mobile. Ignore clicks on any button/link inside the card so this
+  // doesn't fight with Enter/Edit/Pin/Copy/Recheck.
+  if (connectionCount > 0) {
+    card.classList.add('has-connections');
+  }
+  card.addEventListener('click', (e) => {
+    if (e.target.closest('a, button')) return;
+    toggleHighlight(service.id);
   });
-  card.addEventListener('mouseleave', () => clearHighlight(cardsById));
 
   card.draggable = true;
   card.addEventListener('dragstart', (e) => {
@@ -357,6 +366,19 @@ function buildCardElement(service) {
   return card;
 }
 
+// Persistent (not hover-only) connection highlight, toggled by clicking or
+// tapping a card — see buildCardElement for why hover alone isn't enough.
+function toggleHighlight(serviceId) {
+  if (state.highlightedServiceId === serviceId) {
+    state.highlightedServiceId = null;
+    clearHighlight(cardsById);
+    return;
+  }
+  state.highlightedServiceId = serviceId;
+  const adjacency = buildAdjacency(state.config.connections);
+  highlightNeighbors(cardsById, adjacency, serviceId);
+}
+
 function renderCards() {
   cardGrid.innerHTML = '';
   pinnedGrid.innerHTML = '';
@@ -366,22 +388,27 @@ function renderCards() {
   // group filter (search still applies, so searching still narrows them).
   const pinned = state.config.services.filter((s) => s.pinned && matchesSearch(s));
   const regular = filteredServices().filter((s) => !s.pinned);
+  const adjacency = buildAdjacency(state.config.connections);
 
   el('pinnedSection').classList.toggle('hidden', pinned.length === 0);
 
   for (const service of pinned) {
-    const card = buildCardElement(service);
+    const card = buildCardElement(service, adjacency);
     pinnedGrid.appendChild(card);
     cardsById.set(service.id, card);
   }
   for (const service of regular) {
-    const card = buildCardElement(service);
+    const card = buildCardElement(service, adjacency);
     cardGrid.appendChild(card);
     cardsById.set(service.id, card);
   }
 
   el('emptyState').classList.toggle('hidden', pinned.length + regular.length > 0);
 
+  // A re-render (e.g. from a live config update) rebuilds every card node,
+  // so a highlight from before the rebuild needs to be reapplied to the
+  // fresh nodes or it'd silently vanish.
+  if (state.highlightedServiceId) highlightNeighbors(cardsById, adjacency, state.highlightedServiceId);
   if (state.connectionsVisible) requestAnimationFrame(renderConnectionOverlay);
 }
 
@@ -414,7 +441,13 @@ el('toggleConnections').addEventListener('click', () => {
   state.connectionsVisible = !state.connectionsVisible;
   el('toggleConnections').classList.toggle('active', state.connectionsVisible);
   svgOverlay.classList.toggle('visible', state.connectionsVisible);
-  if (state.connectionsVisible) renderConnectionOverlay();
+  if (state.connectionsVisible) {
+    renderConnectionOverlay();
+    if (!localStorage.getItem('mc:seenConnectionsHint')) {
+      toast('Tap a card with a 🔗 badge to see what it’s connected to');
+      localStorage.setItem('mc:seenConnectionsHint', 'true');
+    }
+  }
 });
 
 // ---------- Drag-to-reorder ----------
@@ -424,8 +457,8 @@ el('toggleConnections').addEventListener('click', () => {
 
 let dragOriginContainer = null;
 
-function getDragTarget(container, x, y) {
-  const cards = [...container.querySelectorAll('.service-card:not(.dragging)')];
+function getDragTarget(container, x, y, selector = '.service-card') {
+  const cards = [...container.querySelectorAll(`${selector}:not(.dragging)`)];
 
   // Prefer an exact match: same row as the cursor, left half of the card.
   for (const card of cards) {
@@ -458,13 +491,18 @@ function applyLocalReorder(ids) {
   state.config.services = state.config.services.map((s) => (idSet.has(s.id) ? byId.get(ids[cursor++]) : s));
 }
 
-function enableDragReorder(container) {
+// Generic drag-to-reorder for any flat list of elements with a data-id —
+// used for both the service card grids and the chat channel tabs below.
+// itemSelector picks which children count as draggable rows; reorder(ids)
+// persists the new order server-side; onSuccess/onError update local state
+// to match (or resync from the server if the request failed).
+function enableDragReorder(container, { itemSelector = '.service-card', reorder, onSuccess, onError } = {}) {
   container.addEventListener('dragover', (e) => {
     if (dragOriginContainer !== container) return;
     e.preventDefault();
     const dragging = container.querySelector('.dragging');
     if (!dragging) return;
-    const target = getDragTarget(container, e.clientX, e.clientY);
+    const target = getDragTarget(container, e.clientX, e.clientY, itemSelector);
     if (target == null) {
       container.appendChild(dragging);
     } else if (target !== dragging) {
@@ -475,20 +513,33 @@ function enableDragReorder(container) {
   container.addEventListener('drop', async (e) => {
     if (dragOriginContainer !== container) return;
     e.preventDefault();
-    const ids = Array.from(container.querySelectorAll('.service-card')).map((c) => c.dataset.id);
+    const ids = Array.from(container.querySelectorAll(itemSelector)).map((c) => c.dataset.id);
     try {
-      await api.reorderServices(ids);
-      applyLocalReorder(ids);
-      if (state.connectionsVisible) renderConnectionOverlay();
+      await reorder(ids);
+      onSuccess?.(ids);
     } catch (err) {
       toast(err.message, true);
-      await loadAll();
+      await onError?.();
     }
   });
 }
 
-enableDragReorder(cardGrid);
-enableDragReorder(pinnedGrid);
+enableDragReorder(cardGrid, {
+  reorder: api.reorderServices,
+  onSuccess: (ids) => {
+    applyLocalReorder(ids);
+    if (state.connectionsVisible) renderConnectionOverlay();
+  },
+  onError: loadAll,
+});
+enableDragReorder(pinnedGrid, {
+  reorder: api.reorderServices,
+  onSuccess: (ids) => {
+    applyLocalReorder(ids);
+    if (state.connectionsVisible) renderConnectionOverlay();
+  },
+  onError: loadAll,
+});
 
 window.addEventListener('resize', () => {
   if (state.connectionsVisible) renderConnectionOverlay();
@@ -663,7 +714,10 @@ const THEMES = [
   { id: 'pride', name: 'Pride', bg: '#121016', accent: '#ff4d9e' },
   { id: 'cute', name: 'Cute', bg: '#fdf3f8', accent: '#ff8fc7' },
   { id: 'cozy', name: 'Cozy', bg: '#241a14', accent: '#e08540' },
-  { id: 'her', name: 'Her', bg: '#2b1a1c', accent: '#ff6b4a' },
+  { id: 'her', name: 'Her', bg: '#2b1a24', accent: '#ff6fa8' },
+  { id: 'forest', name: 'Forest', bg: '#0f1710', accent: '#43a047' },
+  { id: 'ocean', name: 'Ocean', bg: '#071620', accent: '#22b8cf' },
+  { id: 'matrix', name: 'Matrix', bg: '#000502', accent: '#00ff41' },
 ];
 
 function applyTheme(themeId) {
@@ -991,17 +1045,24 @@ function renderChatBadge() {
   badge.classList.toggle('hidden', state.chatUnseen === 0);
 }
 
+function applyLocalChannelReorder(ids) {
+  const byId = new Map((state.config.chatChannels || []).map((c) => [c.id, c]));
+  const idSet = new Set(ids);
+  let cursor = 0;
+  state.config.chatChannels = (state.config.chatChannels || []).map((c) => (idSet.has(c.id) ? byId.get(ids[cursor++]) : c));
+}
+
 function renderChatChannels() {
   const wrap = el('chatChannelTabs');
   const channels = state.config.chatChannels || [];
   const canDelete = channels.length > 1;
 
   wrap.innerHTML = channels.map((c) => `
-    <div class="chat-channel-tab ${c.id === state.activeChannelId ? 'active' : ''}" data-id="${c.id}">
+    <div class="chat-channel-tab ${c.id === state.activeChannelId ? 'active' : ''}" data-id="${c.id}" draggable="true">
       <span class="channel-select">${escapeHtml(c.name)}</span>
       ${canDelete ? `<button class="delete-channel-btn" title="Delete channel">✕</button>` : ''}
     </div>
-  `).join('') + `<div class="chat-channel-tab add-channel" id="addChannelBtn">＋</div>`;
+  `).join('') + `<button type="button" class="chat-channel-tab add-channel" id="addChannelBtn" title="New channel">＋</button>`;
 
   wrap.querySelectorAll('.chat-channel-tab[data-id]').forEach((tab) => {
     const id = tab.dataset.id;
@@ -1016,19 +1077,62 @@ function renderChatChannels() {
         toast(err.message, true);
       }
     });
+
+    tab.addEventListener('dragstart', (e) => {
+      dragOriginContainer = wrap;
+      tab.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', id); // required by Firefox to start a drag
+    });
+    tab.addEventListener('dragend', () => {
+      tab.classList.remove('dragging');
+      dragOriginContainer = null;
+    });
   });
 
-  el('addChannelBtn').addEventListener('click', async () => {
-    const name = prompt('New channel name:');
-    if (!name) return;
+  el('addChannelBtn').addEventListener('click', showAddChannelInput);
+}
+
+// A small inline input in place of the ＋ button rather than a browser
+// prompt() — keeps channel creation looking like the rest of the app
+// instead of a native OS dialog.
+function showAddChannelInput() {
+  const addBtn = el('addChannelBtn');
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'add-channel-input';
+  input.placeholder = 'Channel name…';
+  input.maxLength = 40;
+  addBtn.replaceWith(input);
+  input.focus();
+
+  let settled = false;
+  const commit = async () => {
+    if (settled) return;
+    settled = true;
+    const name = input.value.trim();
+    if (!name) { renderChatChannels(); return; }
     try {
-      const channel = await api.createChatChannel(name.trim());
-      switchChannel(channel.id);
+      const channel = await api.createChatChannel(name);
+      await switchChannel(channel.id);
     } catch (err) {
       toast(err.message, true);
+      renderChatChannels();
     }
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { settled = true; renderChatChannels(); }
   });
+  input.addEventListener('blur', commit);
 }
+
+enableDragReorder(el('chatChannelTabs'), {
+  itemSelector: '.chat-channel-tab[data-id]',
+  reorder: api.reorderChatChannels,
+  onSuccess: applyLocalChannelReorder,
+});
 
 async function switchChannel(channelId) {
   state.activeChannelId = channelId;

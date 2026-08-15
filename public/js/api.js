@@ -33,6 +33,7 @@ export const api = {
   getChatChannels: () => request('GET', '/api/chat/channels'),
   createChatChannel: (name) => request('POST', '/api/chat/channels', { name }),
   deleteChatChannel: (id) => request('DELETE', `/api/chat/channels/${encodeURIComponent(id)}`),
+  reorderChatChannels: (ids) => request('PUT', '/api/chat/channels/reorder', { ids }),
   getChatMessages: (channelId) => request('GET', `/api/chat/channels/${encodeURIComponent(channelId)}/messages`),
   deleteChatMessage: (channelId, messageId) =>
     request('DELETE', `/api/chat/messages/${encodeURIComponent(channelId)}/${encodeURIComponent(messageId)}`),

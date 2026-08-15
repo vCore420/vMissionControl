@@ -107,9 +107,12 @@ its own.
   restrictive proxy) or is mid-reconnect.
 - **Chat** — multiple named channels for talking between whatever devices
   currently have the dashboard open: text, links (auto-linkified), and an
-  optional image or file attachment per message, all arriving live. Each
-  device picks its own display name (Settings-free — click "You: Name ✎"
-  in the chat header), stored per-browser, no account system. Message
+  optional image or file attachment per message, all arriving live. Click
+  ＋ for an inline-styled create (no browser prompt popup), drag a channel
+  tab to reorder it, ✕ to delete one (disabled once you're down to your
+  last channel). Each device picks its own display name (Settings-free —
+  click "You: Name ✎" in the chat header), stored per-browser, no account
+  system. Message
   history is in-memory only per channel (last 200, same ephemeral choice
   as the health-status cache) and attachments live on disk under
   `server/data/chat-uploads/` (gitignored) — deleting a message or letting
@@ -127,8 +130,9 @@ its own.
 - **File share** — point Settings → Shared folder at any directory on this
   host and browse/upload/download it from any device that can reach this
   app. Uploads and deletes are each toggleable independently.
-- **Themes** — Dark, Light, Cyberpunk, Pride, Cute, Cozy, and Her, picked
-  from a swatch grid in Settings → Appearance. Every color in the app is a
+- **Themes** — Dark, Light, Cyberpunk, Pride, Cute, Cozy, Her, Forest,
+  Ocean, and Matrix, picked from a swatch grid in Settings → Appearance.
+  Every color in the app is a
   CSS custom property, so a theme is just a full re-declaration of that
   token set — status colors (online/offline/unmonitored/checking) are
   re-tuned per theme but always keep their green/red/gray/amber meaning.

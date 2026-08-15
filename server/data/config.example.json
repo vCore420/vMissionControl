@@ -1,0 +1,75 @@
+{
+  "settings": {
+    "port": 5000,
+    "healthCheckIntervalMs": 15000,
+    "healthCheckTimeoutMs": 3000
+  },
+  "sharedFolder": {
+    "enabled": true,
+    "path": "./shared",
+    "allowUpload": true,
+    "allowDelete": false
+  },
+  "groups": [
+    { "id": "ai", "name": "AI Tools", "color": "#7c5cff" },
+    { "id": "media", "name": "Media", "color": "#ff8a5c" },
+    { "id": "network", "name": "Network", "color": "#4cc9f0" },
+    { "id": "games", "name": "Games", "color": "#5cff8a" }
+  ],
+  "services": [
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "url": "http://localhost:11434",
+      "group": "ai",
+      "icon": "🦙",
+      "description": "Local LLM runtime",
+      "healthCheck": true,
+      "healthCheckPath": "/",
+      "tags": ["llm", "api"],
+      "pinned": false
+    },
+    {
+      "id": "openwebui",
+      "name": "Open WebUI",
+      "url": "http://localhost:3000",
+      "group": "ai",
+      "icon": "💬",
+      "description": "Chat interface for local LLMs",
+      "healthCheck": true,
+      "healthCheckPath": "/",
+      "tags": ["chat", "ui"],
+      "pinned": false
+    },
+    {
+      "id": "comfyui",
+      "name": "ComfyUI",
+      "url": "http://localhost:8188",
+      "group": "ai",
+      "icon": "🎨",
+      "description": "Node-based image generation",
+      "healthCheck": true,
+      "healthCheckPath": "/",
+      "tags": ["image-gen", "ui"],
+      "pinned": false
+    },
+    {
+      "id": "jellyfin",
+      "name": "Jellyfin",
+      "url": "http://localhost:8096",
+      "group": "media",
+      "icon": "🎬",
+      "description": "Media server",
+      "healthCheck": true,
+      "healthCheckPath": "/health",
+      "tags": ["media", "server"],
+      "pinned": false
+    }
+  ],
+  "connections": [
+    { "id": "conn-1", "from": "openwebui", "to": "ollama", "label": "LLM backend" }
+  ],
+  "chatChannels": [
+    { "id": "general", "name": "General" }
+  ]
+}

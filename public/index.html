@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mission Control</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <script>
+    // Applied before first paint so switching themes doesn't flash the
+    // default palette for a frame on every reload.
+    (function () {
+      try {
+        var saved = localStorage.getItem('mc:theme');
+        if (saved) document.documentElement.setAttribute('data-theme', saved);
+      } catch (e) {}
+    })();
+  </script>
+
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#0d0f14" />
+  <link rel="icon" href="/icons/favicon.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Mission Control" />
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-icons">
+      <div class="hero-icon-badge" id="onlineBadge" title="Services online">·</div>
+      <button id="openSettings" class="hero-icon-btn" title="Settings">⚙</button>
+    </div>
+    <div class="brand">🛰️ Mission Control</div>
+    <p class="subtitle">Live status, groups, and connections for everything running on this network.</p>
+  </header>
+
+  <div class="toolbar">
+    <nav class="view-switch" id="viewSwitch">
+      <button data-view="dashboard" class="active">Dashboard</button>
+      <button data-view="files">Files</button>
+      <button data-view="chat">Chat<span class="nav-badge hidden" id="chatBadge">0</span></button>
+    </nav>
+    <input id="search" type="search" placeholder="Search services…" />
+    <button id="toggleConnections" class="btn ghost" title="Show connections between services">🔗 Connections</button>
+    <span class="omnibox-hint" title="Press / anywhere to quick-launch"><kbd>/</kbd> quick launch</span>
+  </div>
+
+  <main id="dashboardView" class="view active">
+    <div class="group-filters" id="groupFilters"></div>
+
+    <div class="grid-wrap" id="gridWrap">
+      <svg id="connectionsOverlay"></svg>
+      <div class="pinned-section hidden" id="pinnedSection">
+        <div class="section-label">📌 Pinned</div>
+        <div class="card-grid" id="pinnedGrid"></div>
+      </div>
+      <div class="card-grid" id="cardGrid"></div>
+      <p class="empty-state hidden" id="emptyState">No services yet — add your first one.</p>
+    </div>
+
+    <button id="addServiceBtn" class="fab">+ Add Service</button>
+  </main>
+
+  <main id="filesView" class="view">
+    <div class="files-toolbar">
+      <div class="breadcrumbs" id="breadcrumbs"></div>
+      <div class="file-actions">
+        <button id="uploadBtn" class="btn">⬆ Upload</button>
+        <input type="file" id="uploadInput" hidden />
+        <button id="mkdirBtn" class="btn ghost">＋ New Folder</button>
+      </div>
+    </div>
+    <div class="file-drop" id="fileDrop">
+      <table class="file-table">
+        <thead>
+          <tr><th></th><th>Name</th><th>Size</th><th>Modified</th><th></th></tr>
+        </thead>
+        <tbody id="fileTableBody"></tbody>
+      </table>
+      <p class="empty-state hidden" id="filesEmptyState">This folder is empty.</p>
+      <p class="empty-state hidden" id="filesDisabledState">
+        File sharing is disabled. Enable it and set a folder path in Settings.
+      </p>
+    </div>
+  </main>
+
+  <main id="chatView" class="view">
+    <div class="chat-layout">
+      <div class="chat-channels" id="chatChannelTabs"></div>
+
+      <div class="chat-main">
+        <div class="chat-header">
+          <span id="chatChannelTitle">General</span>
+          <button type="button" id="deviceNameBtn" class="chat-identity" title="Change your display name">
+            You: <span id="deviceNameLabel"></span> ✎
+          </button>
+        </div>
+
+        <div class="chat-messages" id="chatMessages"></div>
+        <p class="empty-state hidden" id="chatEmptyState">No messages yet — say something.</p>
+
+        <form id="chatForm" class="chat-composer">
+          <div class="chat-attachment-preview hidden" id="chatAttachmentPreview">
+            <span id="chatAttachmentName"></span>
+            <button type="button" id="chatAttachmentRemove">✕</button>
+          </div>
+          <div class="chat-composer-row">
+            <button type="button" id="chatAttachBtn" class="icon-btn" title="Attach a file">📎</button>
+            <input type="file" id="chatFileInput" hidden />
+            <textarea id="chatTextInput" placeholder="Message this channel…"></textarea>
+            <button type="submit" class="btn primary">Send</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <!-- Add/Edit service modal -->
+  <div id="serviceModal" class="modal hidden">
+    <div class="modal-card">
+      <h2 id="serviceModalTitle">Add Service</h2>
+      <form id="serviceForm">
+        <label>Name<input name="name" required placeholder="e.g. Jellyfin" /></label>
+        <label>URL<input name="url" required placeholder="http://127.0.0.1:8096" /></label>
+        <label>Icon (emoji, optional — leave blank to use the site's favicon)<input name="icon" placeholder="🔧" maxlength="4" /></label>
+        <label>Group
+          <select name="group" id="serviceGroupSelect"></select>
+        </label>
+        <label>Description<input name="description" placeholder="Optional" /></label>
+        <label>Tags (comma separated)<input name="tags" placeholder="media, server" /></label>
+        <label class="checkbox-row">
+          <input type="checkbox" name="healthCheck" checked />
+          Monitor health (HTTP ping)
+        </label>
+        <label>Health check path<input name="healthCheckPath" placeholder="/" /></label>
+        <fieldset>
+          <legend>Connections</legend>
+          <div id="connectionsChecklist" class="checklist"></div>
+        </fieldset>
+        <div class="modal-actions">
+          <button type="button" id="deleteServiceBtn" class="btn danger hidden">Delete</button>
+          <div class="spacer"></div>
+          <button type="button" id="cancelServiceBtn" class="btn ghost">Cancel</button>
+          <button type="submit" class="btn primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Settings modal -->
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-card">
+      <h2>Settings</h2>
+      <div class="settings-section">
+        <h3>Appearance</h3>
+        <div id="themeGrid" class="theme-grid"></div>
+      </div>
+      <div class="settings-section">
+        <h3>Groups</h3>
+        <div id="groupsList" class="groups-list"></div>
+        <form id="addGroupForm" class="inline-form">
+          <input name="name" placeholder="New group name" required />
+          <input name="color" type="color" value="#7c5cff" />
+          <button type="submit" class="btn">Add</button>
+        </form>
+      </div>
+      <div class="settings-section">
+        <h3>Health checks</h3>
+        <label>Interval (seconds)
+          <input id="intervalInput" type="number" min="3" />
+        </label>
+        <label>Timeout (seconds)
+          <input id="timeoutInput" type="number" min="1" />
+        </label>
+      </div>
+      <div class="settings-section">
+        <h3>Notifications</h3>
+        <label class="checkbox-row">
+          <input type="checkbox" id="notifyToggle" />
+          Notify me when a service goes offline or comes back online
+        </label>
+        <p class="settings-hint">
+          Always shown as an in-page toast. Desktop notifications additionally
+          require browser permission and only work when this app is opened at
+          <code>localhost</code> — browsers block them on a plain-HTTP LAN address.
+        </p>
+      </div>
+      <div class="settings-section">
+        <h3>Shared folder</h3>
+        <label class="checkbox-row">
+          <input type="checkbox" id="sharedEnabled" />
+          Enabled
+        </label>
+        <label>Folder path (on this host)
+          <input id="sharedPath" placeholder="./shared or C:\Users\you\Shared" />
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" id="sharedAllowUpload" />
+          Allow uploads from any connected device
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" id="sharedAllowDelete" />
+          Allow deletes from any connected device
+        </label>
+      </div>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="closeSettingsBtn" class="btn ghost">Close</button>
+        <button type="button" id="saveSettingsBtn" class="btn primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Omnibox quick launcher (press /) -->
+  <div id="omniboxModal" class="modal hidden omnibox-modal">
+    <div class="modal-card omnibox-card">
+      <input id="omniboxInput" type="text" placeholder="Jump to a service or site… (Esc to close)" autocomplete="off" />
+      <div class="omnibox-results" id="omniboxResults"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

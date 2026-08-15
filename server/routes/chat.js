@@ -40,6 +40,25 @@ chatRouter.post('/channels', async (req, res) => {
   res.status(201).json(channel);
 });
 
+chatRouter.put('/channels/reorder', async (req, res) => {
+  const config = await loadConfig();
+  const ids = req.body.ids;
+  if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string')) {
+    return res.status(400).json({ error: 'ids must be an array of channel ids' });
+  }
+  const byId = new Map(config.chatChannels.map((c) => [c.id, c]));
+  if (!ids.every((id) => byId.has(id))) {
+    return res.status(400).json({ error: 'unknown channel id in reorder list' });
+  }
+
+  const idSet = new Set(ids);
+  let cursor = 0;
+  config.chatChannels = config.chatChannels.map((c) => (idSet.has(c.id) ? byId.get(ids[cursor++]) : c));
+
+  await saveConfig(config);
+  res.json({ ok: true });
+});
+
 chatRouter.delete('/channels/:id', async (req, res) => {
   const config = await loadConfig();
   if (config.chatChannels.length <= 1) {

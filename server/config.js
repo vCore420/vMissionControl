@@ -38,6 +38,22 @@ async function migrate(config) {
     config.chatChannels = [{ id: 'general', name: 'General' }];
     changed = true;
   }
+  if (!config.alerts) {
+    config.alerts = { enabled: false, webhookUrl: '', format: 'generic' };
+    changed = true;
+  }
+  if (!config.auth) {
+    config.auth = { enabled: false, salt: '', hash: '', sessionDays: 30 };
+    changed = true;
+  }
+  if (config.auth.sessionDays === undefined) {
+    config.auth.sessionDays = 30;
+    changed = true;
+  }
+  if (!config.security) {
+    config.security = { ipAllowlist: { enabled: false, subnets: [] } };
+    changed = true;
+  }
   if (changed) await saveConfig(config);
   return config;
 }
@@ -59,6 +75,14 @@ export async function saveConfig(next) {
   await writeQueue;
   appEvents.emit('config', cache);
   return cache;
+}
+
+// The one thing in config.json that must never reach a client: the
+// password salt/hash. Used everywhere config gets sent out — GET
+// /api/config and every WebSocket 'config' broadcast — so there's a single
+// place this rule lives instead of every call site remembering it.
+export function sanitizeConfig(config) {
+  return { ...config, auth: { enabled: !!config.auth?.enabled, sessionDays: config.auth?.sessionDays ?? 30 } };
 }
 
 export function resolveSharedFolderPath(config) {

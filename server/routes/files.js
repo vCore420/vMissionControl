@@ -3,6 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import multer from 'multer';
 import { loadConfig, resolveSharedFolderPath } from '../config.js';
+import { logActivity } from '../activityLog.js';
+import { clientIp } from '../net.js';
 
 export const filesRouter = Router();
 
@@ -70,6 +72,7 @@ filesRouter.post('/mkdir', async (req, res) => {
   try {
     const target = await safeResolve(req.mcConfig, req.body.path);
     await fs.mkdir(target, { recursive: false });
+    logActivity('file', `Created folder "${req.body.path}"`, clientIp(req));
     res.status(201).json({ ok: true });
   } catch (err) {
     if (err instanceof PathError) return res.status(400).json({ error: err.message });
@@ -90,6 +93,7 @@ filesRouter.delete('/', async (req, res) => {
     } else {
       await fs.unlink(target);
     }
+    logActivity('file', `Deleted "${req.query.path}"`, clientIp(req));
     res.status(204).end();
   } catch (err) {
     if (err instanceof PathError) return res.status(400).json({ error: err.message });
@@ -112,6 +116,7 @@ filesRouter.post('/upload', upload.single('file'), async (req, res) => {
     const rootWithSep = destDir.endsWith(path.sep) ? destDir : destDir + path.sep;
     if (!destFile.startsWith(rootWithSep)) throw new PathError('invalid filename');
     await fs.writeFile(destFile, req.file.buffer);
+    logActivity('file', `Uploaded "${path.basename(destFile)}"`, clientIp(req));
     res.status(201).json({ ok: true, name: path.basename(destFile) });
   } catch (err) {
     if (err instanceof PathError) return res.status(400).json({ error: err.message });

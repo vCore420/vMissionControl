@@ -5,6 +5,8 @@ import crypto from 'node:crypto';
 import multer from 'multer';
 import { loadConfig, saveConfig } from '../config.js';
 import { getMessages, addMessage, deleteMessage, deleteChannelMessages, ensureUploadDir, UPLOAD_DIR } from '../chat.js';
+import { logActivity } from '../activityLog.js';
+import { clientIp } from '../net.js';
 
 export const chatRouter = Router();
 
@@ -37,6 +39,7 @@ chatRouter.post('/channels', async (req, res) => {
   const channel = { id, name };
   config.chatChannels.push(channel);
   await saveConfig(config);
+  logActivity('chat', `Created channel "${channel.name}"`, clientIp(req));
   res.status(201).json(channel);
 });
 
@@ -67,9 +70,11 @@ chatRouter.delete('/channels/:id', async (req, res) => {
   const idx = config.chatChannels.findIndex((c) => c.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'channel not found' });
 
+  const deletedName = config.chatChannels[idx].name;
   config.chatChannels.splice(idx, 1);
   await saveConfig(config);
   await deleteChannelMessages(req.params.id);
+  logActivity('chat', `Deleted channel "${deletedName}"`, clientIp(req));
   res.status(204).end();
 });
 

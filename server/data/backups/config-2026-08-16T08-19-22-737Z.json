@@ -1,0 +1,215 @@
+{
+  "settings": {
+    "port": 5000,
+    "healthCheckIntervalMs": 15000,
+    "healthCheckTimeoutMs": 3000
+  },
+  "sharedFolder": {
+    "enabled": true,
+    "path": "./shared",
+    "allowUpload": true,
+    "allowDelete": false
+  },
+  "alerts": {
+    "enabled": false,
+    "webhookUrl": "",
+    "format": "generic"
+  },
+  "groups": [
+    {
+      "id": "ai",
+      "name": "AI Tools",
+      "color": "#7c5cff"
+    },
+    {
+      "id": "media",
+      "name": "Media",
+      "color": "#ff8a5c"
+    },
+    {
+      "id": "network",
+      "name": "Network",
+      "color": "#4cc9f0"
+    },
+    {
+      "id": "games",
+      "name": "Games",
+      "color": "#5cff8a"
+    },
+    {
+      "id": "website",
+      "name": "Website",
+      "color": "#f5a623"
+    }
+  ],
+  "services": [
+    {
+      "id": "jellyfin",
+      "name": "Jellyfin",
+      "url": "http://100.98.221.75:8096",
+      "group": "media",
+      "icon": "",
+      "description": "Media server",
+      "healthCheck": true,
+      "healthCheckPath": "/",
+      "tags": [],
+      "pinned": false,
+      "mac": ""
+    },
+    {
+      "id": "github",
+      "name": "Github",
+      "url": "https://github.com/vCore420",
+      "group": "website",
+      "icon": "",
+      "description": "vCore - GitHub User Page",
+      "healthCheck": true,
+      "healthCheckPath": "/",
+      "tags": [],
+      "pinned": false,
+      "mac": ""
+    },
+    {
+      "id": "openwebui",
+      "name": "Open WebUI",
+      "url": "http://100.98.221.75:3000",
+      "group": "ai",
+      "icon": "",
+      "description": "Chat interface for local LLMs",
+      "healthCheck": true,
+      "healthCheckPath": "/",
+      "tags": [],
+      "pinned": false,
+      "mac": ""
+    },
+    {
+      "id": "odysseus",
+      "name": "Odysseus",
+      "url": "http://100.98.221.75:7000",
+      "group": "ai",
+      "icon": "",
+      "description": "AI Dashboard for Local LLMs",
+      "healthCheck": true,
+      "healthCheckPath": "/",
+      "tags": [],
+      "pinned": false,
+      "mac": ""
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "url": "http://127.0.0.1:11434",
+      "group": "ai",
+      "icon": "",
+      "description": "Local LLM runtime",
+      "healthCheck": true,
+      "healthCheckPath": "/",
+      "tags": [],
+      "pinned": false,
+      "mac": ""
+    },
+    {
+      "id": "comfyui",
+      "name": "ComfyUI",
+      "url": "http://100.98.221.75:8188",
+      "group": "ai",
+      "icon": "🖼️",
+      "description": "Node-based image generation",
+      "healthCheck": true,
+      "healthCheckPath": "/",
+      "tags": [],
+      "pinned": false,
+      "mac": ""
+    },
+    {
+      "id": "tailscale",
+      "name": "Tailscale",
+      "url": "http://127.0.0.1:41112",
+      "group": "network",
+      "icon": "",
+      "description": "Mesh VPN / local network access",
+      "healthCheck": false,
+      "healthCheckPath": "/",
+      "tags": [],
+      "pinned": false,
+      "mac": ""
+    },
+    {
+      "id": "unclaimed",
+      "name": "Unclaimed",
+      "url": "http://100.98.221.75:5173",
+      "group": "games",
+      "icon": "",
+      "description": "Cozy game dev build (Vite)",
+      "healthCheck": true,
+      "healthCheckPath": "/",
+      "tags": [],
+      "pinned": false,
+      "mac": ""
+    },
+    {
+      "id": "the-workshop",
+      "name": "The Workshop",
+      "url": "https://vcore420.github.io/vWorkshop/",
+      "group": "games",
+      "icon": "",
+      "description": "",
+      "healthCheck": true,
+      "healthCheckPath": "/",
+      "tags": [],
+      "pinned": false,
+      "mac": ""
+    },
+    {
+      "id": "cynrith",
+      "name": "Cynrith",
+      "url": "https://vcore420.github.io/Cynrith/",
+      "group": "games",
+      "icon": "🕹️",
+      "description": "2d Pixel Art Tile Baised Game",
+      "healthCheck": true,
+      "healthCheckPath": "/",
+      "tags": [],
+      "pinned": false,
+      "mac": ""
+    },
+    {
+      "id": "retro-vpod",
+      "name": "Retro vPod",
+      "url": "https://vcore420.github.io/vPodRetroPlayer/",
+      "group": "media",
+      "icon": "",
+      "description": "Local Music in a Retro Style",
+      "healthCheck": true,
+      "healthCheckPath": "/",
+      "tags": [],
+      "pinned": false,
+      "mac": ""
+    },
+    {
+      "id": "pomss-calvulator",
+      "name": "POMSS Calvulator",
+      "url": "https://vcore420.github.io/vCal/",
+      "group": "website",
+      "icon": "",
+      "description": "An Array of Calulators for the POMSS Team",
+      "healthCheck": true,
+      "healthCheckPath": "/",
+      "tags": [],
+      "pinned": false,
+      "mac": ""
+    }
+  ],
+  "connections": [],
+  "chatChannels": [
+    {
+      "id": "general",
+      "name": "General"
+    }
+  ],
+  "auth": {
+    "enabled": false,
+    "salt": "",
+    "hash": ""
+  }
+}

@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { loadConfig, saveConfig } from '../config.js';
+import { logActivity } from '../activityLog.js';
+import { clientIp } from '../net.js';
 
 export const groupsRouter = Router();
 
@@ -23,6 +25,7 @@ groupsRouter.post('/', async (req, res) => {
   const group = { id, name, color: color || '#8888ff' };
   config.groups.push(group);
   await saveConfig(config);
+  logActivity('group', `Created "${group.name}"`, clientIp(req));
   res.status(201).json(group);
 });
 
@@ -38,6 +41,7 @@ groupsRouter.put('/:id', async (req, res) => {
     color: req.body.color ?? existing.color,
   };
   await saveConfig(config);
+  logActivity('group', `Updated "${config.groups[idx].name}"`, clientIp(req));
   res.json(config.groups[idx]);
 });
 
@@ -46,10 +50,12 @@ groupsRouter.delete('/:id', async (req, res) => {
   const idx = config.groups.findIndex((g) => g.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'group not found' });
 
+  const deletedName = config.groups[idx].name;
   config.groups.splice(idx, 1);
   config.services.forEach((s) => {
     if (s.group === req.params.id) s.group = null;
   });
   await saveConfig(config);
+  logActivity('group', `Deleted "${deletedName}"`, clientIp(req));
   res.status(204).end();
 });

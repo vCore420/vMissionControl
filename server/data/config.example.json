@@ -71,5 +71,22 @@
   ],
   "chatChannels": [
     { "id": "general", "name": "General" }
-  ]
+  ],
+  "alerts": {
+    "enabled": false,
+    "webhookUrl": "",
+    "format": "generic"
+  },
+  "auth": {
+    "enabled": false,
+    "salt": "",
+    "hash": "",
+    "sessionDays": 30
+  },
+  "security": {
+    "ipAllowlist": {
+      "enabled": false,
+      "subnets": []
+    }
+  }
 }

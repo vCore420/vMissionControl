@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { loadConfig, saveConfig } from '../config.js';
 import { checkNow, checkOneService, forgetService } from '../healthChecker.js';
+import { sendMagicPacket, isValidMac } from '../wol.js';
+import { logActivity } from '../activityLog.js';
+import { clientIp } from '../net.js';
 
 export const servicesRouter = Router();
 
@@ -20,6 +23,11 @@ servicesRouter.post('/', async (req, res) => {
     return res.status(400).json({ error: 'name and url are required' });
   }
 
+  const mac = (body.mac || '').trim();
+  if (mac && !isValidMac(mac)) {
+    return res.status(400).json({ error: 'mac must look like AA:BB:CC:DD:EE:FF' });
+  }
+
   let id = slugify(body.name);
   if (config.services.some((s) => s.id === id)) id = `${id}-${Date.now()}`;
 
@@ -34,10 +42,12 @@ servicesRouter.post('/', async (req, res) => {
     healthCheckPath: body.healthCheckPath || '/',
     tags: Array.isArray(body.tags) ? body.tags : [],
     pinned: body.pinned === true,
+    mac,
   };
 
   config.services.push(service);
   await saveConfig(config);
+  logActivity('service', `Created "${service.name}" (${service.url})`, clientIp(req));
   checkNow(loadConfig).catch(() => {});
   res.status(201).json(service);
 });
@@ -74,6 +84,12 @@ servicesRouter.put('/:id', async (req, res) => {
 
   const existing = config.services[idx];
   const body = req.body;
+
+  const mac = body.mac !== undefined ? body.mac.trim() : existing.mac;
+  if (mac && !isValidMac(mac)) {
+    return res.status(400).json({ error: 'mac must look like AA:BB:CC:DD:EE:FF' });
+  }
+
   config.services[idx] = {
     ...existing,
     name: body.name ?? existing.name,
@@ -85,9 +101,11 @@ servicesRouter.put('/:id', async (req, res) => {
     healthCheckPath: body.healthCheckPath ?? existing.healthCheckPath,
     tags: Array.isArray(body.tags) ? body.tags : existing.tags,
     pinned: body.pinned !== undefined ? !!body.pinned : existing.pinned,
+    mac,
   };
 
   await saveConfig(config);
+  logActivity('service', `Updated "${config.services[idx].name}"`, clientIp(req));
   checkNow(loadConfig).catch(() => {});
   res.json(config.services[idx]);
 });
@@ -97,12 +115,14 @@ servicesRouter.delete('/:id', async (req, res) => {
   const idx = config.services.findIndex((s) => s.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'service not found' });
 
+  const deletedName = config.services[idx].name;
   config.services.splice(idx, 1);
   config.connections = config.connections.filter(
     (c) => c.from !== req.params.id && c.to !== req.params.id
   );
   await saveConfig(config);
   forgetService(req.params.id);
+  logActivity('service', `Deleted "${deletedName}"`, clientIp(req));
   res.status(204).end();
 });
 
@@ -112,4 +132,24 @@ servicesRouter.post('/:id/check', async (req, res) => {
   const status = await checkOneService(loadConfig, req.params.id);
   if (!status) return res.status(404).json({ error: 'service not found' });
   res.json(status);
+});
+
+// Sends a Wake-on-LAN magic packet to the service's saved MAC address —
+// only meaningful for a service that's a whole machine (or whose host
+// supports WOL), not a container/process running inside an already-awake
+// host. Fire-and-forget from the caller's point of view: a successful send
+// just means the broadcast went out, not that the device actually woke.
+servicesRouter.post('/:id/wake', async (req, res) => {
+  const config = await loadConfig();
+  const service = config.services.find((s) => s.id === req.params.id);
+  if (!service) return res.status(404).json({ error: 'service not found' });
+  if (!service.mac) return res.status(400).json({ error: 'this service has no MAC address saved' });
+
+  try {
+    await sendMagicPacket(service.mac);
+    logActivity('service', `Sent Wake-on-LAN to "${service.name}"`, clientIp(req));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });

@@ -8,10 +8,30 @@
 // database.
 
 import { appEvents } from './events.js';
+import { checkTransitions, forgetService as forgetAlertService } from './alerts.js';
+import { logActivity } from './activityLog.js';
 
 const statusCache = new Map();
 const historyCache = new Map(); // serviceId -> Array<{status: 'online'|'offline', t: number}>
 let timer = null;
+
+// Separate from alerts.js's own transition tracker (which only runs when a
+// webhook is configured) — this logs every online<->offline flip
+// unconditionally, since the activity log is meant to capture that
+// regardless of whether external alerts are set up.
+const prevLoggedStatus = new Map();
+const LOGGABLE_STATUSES = new Set(['online', 'offline']);
+
+function logTransitions(snapshot, services) {
+  const nameById = new Map(services.map((s) => [s.id, s.name]));
+  for (const entry of snapshot) {
+    const prev = prevLoggedStatus.get(entry.id);
+    prevLoggedStatus.set(entry.id, entry.status);
+    if (!LOGGABLE_STATUSES.has(prev) || !LOGGABLE_STATUSES.has(entry.status) || prev === entry.status) continue;
+    const name = nameById.get(entry.id) ?? entry.id;
+    logActivity('health', `"${name}" ${entry.status === 'online' ? 'came back online' : 'went offline'}`);
+  }
+}
 
 const HISTORY_MAX_AGE_MS = 6 * 60 * 60 * 1000; // 6 hours of samples is plenty for a sparkline
 const HISTORY_MAX_ENTRIES = 2000; // safety cap regardless of check interval
@@ -86,7 +106,10 @@ async function runSweep(getConfig) {
   const config = await getConfig();
   const timeoutMs = config.settings.healthCheckTimeoutMs ?? 3000;
   await Promise.allSettled(config.services.map((s) => checkOne(s, timeoutMs)));
-  appEvents.emit('status', getStatusSnapshot());
+  const snapshot = getStatusSnapshot();
+  logTransitions(snapshot, config.services);
+  checkTransitions(snapshot, config);
+  appEvents.emit('status', snapshot);
 }
 
 export function startHealthChecker(getConfig) {
@@ -133,6 +156,8 @@ export async function checkOneService(getConfig, serviceId) {
   const timeoutMs = config.settings.healthCheckTimeoutMs ?? 3000;
   await checkOne(service, timeoutMs);
   const snapshot = getStatusSnapshot();
+  logTransitions(snapshot, config.services);
+  checkTransitions(snapshot, config);
   appEvents.emit('status', snapshot);
   return snapshot.find((s) => s.id === serviceId) ?? null;
 }
@@ -142,4 +167,6 @@ export async function checkOneService(getConfig, serviceId) {
 export function forgetService(serviceId) {
   statusCache.delete(serviceId);
   historyCache.delete(serviceId);
+  prevLoggedStatus.delete(serviceId);
+  forgetAlertService(serviceId);
 }

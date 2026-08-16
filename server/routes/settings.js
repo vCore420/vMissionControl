@@ -1,12 +1,19 @@
 import { Router } from 'express';
 import fs from 'node:fs/promises';
 import { loadConfig, saveConfig, resolveSharedFolderPath } from '../config.js';
+import { sendTestAlert } from '../alerts.js';
+import { isValidCidr, isIpAllowed } from '../ipAllowlist.js';
+import { logActivity } from '../activityLog.js';
+import { clientIp } from '../net.js';
 
 export const settingsRouter = Router();
+
+const ALERT_FORMATS = new Set(['generic', 'discord', 'slack']);
 
 settingsRouter.put('/', async (req, res) => {
   const config = await loadConfig();
   const body = req.body;
+  const ip = clientIp(req);
 
   if (body.settings) {
     config.settings = {
@@ -15,6 +22,7 @@ settingsRouter.put('/', async (req, res) => {
       healthCheckTimeoutMs: body.settings.healthCheckTimeoutMs ?? config.settings.healthCheckTimeoutMs,
       port: body.settings.port ?? config.settings.port,
     };
+    logActivity('settings', 'Updated health-check settings', ip);
   }
 
   if (body.sharedFolder) {
@@ -31,8 +39,66 @@ settingsRouter.put('/', async (req, res) => {
       }
     }
     config.sharedFolder = next;
+    logActivity('settings', 'Updated shared-folder settings', ip);
+  }
+
+  if (body.alerts) {
+    const webhookUrl = (body.alerts.webhookUrl ?? config.alerts.webhookUrl ?? '').trim();
+    const format = body.alerts.format ?? config.alerts.format;
+    if (webhookUrl && !/^https?:\/\//i.test(webhookUrl)) {
+      return res.status(400).json({ error: 'webhook URL must start with http:// or https://' });
+    }
+    if (!ALERT_FORMATS.has(format)) {
+      return res.status(400).json({ error: 'unknown alert format' });
+    }
+    config.alerts = {
+      enabled: body.alerts.enabled !== undefined ? !!body.alerts.enabled : config.alerts.enabled,
+      webhookUrl,
+      format,
+    };
+    logActivity('settings', 'Updated external alert settings', ip);
+  }
+
+  if (body.security?.ipAllowlist) {
+    const incoming = body.security.ipAllowlist;
+    const subnets = Array.isArray(incoming.subnets)
+      ? incoming.subnets.map((s) => String(s).trim()).filter(Boolean)
+      : config.security.ipAllowlist.subnets;
+    const bad = subnets.find((cidr) => !isValidCidr(cidr));
+    if (bad) {
+      return res.status(400).json({ error: `"${bad}" isn't a valid IP or CIDR range (e.g. 192.168.1.0/24)` });
+    }
+    const willBeEnabled = incoming.enabled !== undefined ? !!incoming.enabled : config.security.ipAllowlist.enabled;
+    if (willBeEnabled && !isIpAllowed({ security: { ipAllowlist: { enabled: true, subnets } } }, ip)) {
+      return res.status(400).json({ error: 'this would block your own current IP — add a range that includes it first' });
+    }
+    config.security = {
+      ...config.security,
+      ipAllowlist: {
+        enabled: incoming.enabled !== undefined ? !!incoming.enabled : config.security.ipAllowlist.enabled,
+        subnets,
+      },
+    };
+    logActivity(
+      'settings',
+      `Updated IP allowlist (${config.security.ipAllowlist.enabled ? 'on' : 'off'}, ${subnets.length} range${subnets.length === 1 ? '' : 's'})`,
+      ip
+    );
   }
 
   await saveConfig(config);
-  res.json({ settings: config.settings, sharedFolder: config.sharedFolder });
+  res.json({ settings: config.settings, sharedFolder: config.sharedFolder, alerts: config.alerts, security: config.security });
+});
+
+// Sends one test message through the currently *saved* webhook config, not
+// whatever's unsaved in the form — lets you confirm the URL actually works
+// before flipping "Enabled" on for real status changes.
+settingsRouter.post('/test-alert', async (req, res) => {
+  const config = await loadConfig();
+  try {
+    await sendTestAlert(config);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });

@@ -201,6 +201,88 @@
   --dot: rgba(0, 255, 65, 0.1);
 }
 
+/* Muted Scandinavian blue-gray — the Nord palette, desaturated and cool
+   where most of the other dark themes lean saturated/warm. */
+:root[data-theme="nord"] {
+  --bg: #2e3440;
+  --bg-elevated: #3b4252;
+  --bg-card: #434c5e;
+  --bg-card-hover: #4c566a;
+  --bg-panel: #333a46;
+  --border: #4c566a;
+  --text: #eceff4;
+  --text-dim: #d8dee9;
+  --text-faint: #7b88a1;
+  --accent: #88c0d0;
+  --accent-dim: #4c6b75;
+  --online: #a3be8c;
+  --offline: #bf616a;
+  --unmonitored: #7b88a1;
+  --checking: #ebcb8b;
+  --dot: rgba(236, 239, 244, 0.06);
+}
+
+:root[data-theme="sunset"] {
+  --bg: #1a0f1f;
+  --bg-elevated: #24132b;
+  --bg-card: #2c1734;
+  --bg-card-hover: #341c3d;
+  --bg-panel: #21102a;
+  --border: #4a2456;
+  --text: #fdeee0;
+  --text-dim: #e8b4a0;
+  --text-faint: #a06a7a;
+  --accent: #ff7e5f;
+  --accent-dim: #7a3524;
+  --online: #6fdc9a;
+  --offline: #ff5f7e;
+  --unmonitored: #a06a7a;
+  --checking: #ffcf6b;
+  --dot: rgba(255, 126, 95, 0.12);
+}
+
+:root[data-theme="vaporwave"] {
+  --bg: #100a24;
+  --bg-elevated: #17103a;
+  --bg-card: #1d1447;
+  --bg-card-hover: #251a56;
+  --bg-panel: #140d30;
+  --border: #3d2b7a;
+  --text: #f1e9ff;
+  --text-dim: #c8b6f0;
+  --text-faint: #8b76b8;
+  --accent: #ff71ce;
+  --accent-dim: #7a2f66;
+  --online: #05ffa1;
+  --offline: #ff5277;
+  --unmonitored: #8b76b8;
+  --checking: #ffe66d;
+  --dot: rgba(255, 113, 206, 0.12);
+}
+
+/* True grayscale — no hue anywhere except the status dots, which keep
+   their color on purpose (see the note above the theme block): dropping
+   red/green there too would make "online vs. offline" unreadable, not
+   just monochrome. */
+:root[data-theme="mono"] {
+  --bg: #121212;
+  --bg-elevated: #1a1a1a;
+  --bg-card: #1f1f1f;
+  --bg-card-hover: #272727;
+  --bg-panel: #161616;
+  --border: #333333;
+  --text: #f0f0f0;
+  --text-dim: #a0a0a0;
+  --text-faint: #6b6b6b;
+  --accent: #ffffff;
+  --accent-dim: #555555;
+  --online: #7fd88f;
+  --offline: #e06666;
+  --unmonitored: #6b6b6b;
+  --checking: #d4c96a;
+  --dot: rgba(240, 240, 240, 0.05);
+}
+
 /* A couple of themes get one extra flourish beyond the token swap — a
    gradient on the primary call-to-action button — rather than a gradient
    forced into every card border, which would fight the app's flat
@@ -234,7 +316,7 @@ button, input, select {
 .hero {
   position: relative;
   text-align: center;
-  padding: 34px 24px 26px;
+  padding: 14px 24px 12px;
   background:
     radial-gradient(circle, var(--dot) 1px, transparent 1px) 0 0 / 26px 26px,
     radial-gradient(ellipse 60% 100% at 50% 0%, var(--accent-dim) 0%, transparent 70%),
@@ -244,23 +326,23 @@ button, input, select {
 }
 
 .brand {
-  font-size: 2.1rem;
+  font-size: 1.4rem;
   font-weight: 700;
   letter-spacing: 0.02em;
   margin: 0;
 }
 
 .subtitle {
-  margin: 10px auto 0;
+  margin: 4px auto 0;
   max-width: 620px;
   color: var(--text-dim);
-  font-size: 0.92rem;
-  line-height: 1.5;
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 .hero-icons {
   position: absolute;
-  top: 18px;
+  top: 12px;
   right: 24px;
   display: flex;
   align-items: center;
@@ -291,6 +373,13 @@ button, input, select {
   border-color: var(--accent);
   color: var(--text);
 }
+
+/* Color mirrors the host-bar-fill thresholds in Settings/the health
+   modal — green under 60%, amber 60-85%, red above — so the at-a-glance
+   pill and the detailed view never disagree about what's "fine". */
+.hero-icon-btn.host-health-quick.online { color: var(--online); }
+.hero-icon-btn.host-health-quick.checking { color: var(--checking); }
+.hero-icon-btn.host-health-quick.offline { color: var(--offline); }
 
 /* ---------- Toolbar ---------- */
 
@@ -350,17 +439,29 @@ button, input, select {
   vertical-align: middle;
 }
 
+/* Dashboard-only controls (search + Connections + Discover) live in their
+   own group so they can be hidden as one unit on Files/Chat — where none
+   of the three do anything, since they all act on the service grid. A
+   single margin-left:auto on this group (not on each .btn individually,
+   which is what pushed Connections around when Discover was added) is
+   what pins the group — and the always-visible quick-launch hint after
+   it — to the right of the toolbar. */
+.toolbar-dashboard-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  min-width: 0;
+}
+
 #search {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 12px;
   color: var(--text);
-  width: 220px;
-}
-
-.toolbar .btn {
-  margin-left: auto;
+  width: 200px;
+  min-width: 0;
 }
 
 .omnibox-hint {
@@ -391,6 +492,7 @@ button, input, select {
   font-size: 0.85rem;
   font-family: inherit;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .btn:hover { filter: brightness(1.1); }
@@ -419,12 +521,48 @@ button, input, select {
 .view.active { display: block; }
 
 /* Group filters */
+.dashboard-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+
 .group-filters {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 22px;
   justify-content: center;
+  flex: 1;
+}
+
+/* Reused for the dashboard/files/chat layout switchers — same pill-group
+   look as the view-switch nav, just smaller and icon-only. */
+.layout-switch {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-card);
+  border-radius: 10px;
+  padding: 4px;
+  flex-shrink: 0;
+}
+
+.layout-switch button {
+  background: transparent;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+.layout-switch button.active {
+  background: var(--accent);
+  color: white;
 }
 
 .group-chip {
@@ -618,13 +756,35 @@ button, input, select {
 }
 
 .card-url {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: inherit;
   font-size: 0.75rem;
   color: var(--text-faint);
   margin-top: 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: center;
+  cursor: pointer;
 }
+
+.card-url.revealed { color: var(--text-dim); }
+.card-url:hover { color: var(--accent); }
+
+.device-ip-toggle {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.device-ip-toggle:hover { color: var(--accent); }
 
 .status-dot {
   width: 10px;
@@ -782,6 +942,152 @@ button, input, select {
   padding: 60px 0;
 }
 
+/* ---------- Dashboard: list layout ---------- */
+
+.services-list {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.service-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.service-row:hover { background: var(--bg-card-hover); }
+
+.service-row .row-icon {
+  font-size: 1.3rem;
+  flex-shrink: 0;
+  width: 26px;
+  text-align: center;
+}
+
+.service-row .row-icon img {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  vertical-align: middle;
+}
+
+.service-row .row-name {
+  font-weight: 700;
+  flex-shrink: 0;
+  min-width: 110px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-row .row-star { flex-shrink: 0; color: #fbbf24; width: 14px; }
+
+.service-row .row-meta {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-row .row-uptime {
+  flex-shrink: 0;
+  width: 44px;
+  text-align: right;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+
+.service-row .row-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ---------- Dashboard: graph layout ---------- */
+
+.services-graph {
+  position: relative;
+  height: 560px;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle, var(--dot) 1px, transparent 1px) 0 0 / 26px 26px,
+    var(--bg-panel);
+  overflow: hidden;
+}
+
+#graphOverlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.graph-nodes {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.graph-node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  width: 88px;
+}
+
+.graph-node-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 3px solid var(--unmonitored);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  box-shadow: var(--shadow);
+}
+
+.graph-node-icon img {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+}
+
+.graph-node.online .graph-node-icon { border-color: var(--online); }
+.graph-node.offline .graph-node-icon { border-color: var(--offline); }
+.graph-node.pinned .graph-node-icon { box-shadow: 0 0 0 3px var(--accent-dim); }
+
+.graph-node-label {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  text-align: center;
+  max-width: 88px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-node:hover .graph-node-label { color: var(--text); }
+
 .fab {
   position: fixed;
   bottom: 28px;
@@ -796,7 +1102,7 @@ button, input, select {
   font-family: inherit;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 6px 20px rgba(124, 92, 255, 0.4);
+  box-shadow: 0 6px 20px var(--accent-dim);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -808,7 +1114,6 @@ button, input, select {
 
 .files-toolbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
   flex-wrap: wrap;
@@ -818,12 +1123,21 @@ button, input, select {
   margin-right: auto;
 }
 
+/* flex:1 (not justify-content:space-between on the toolbar) is what pins
+   the layout switch and file actions together at the right edge — with
+   space-between, the middle item (the layout switch) recentered itself
+   into whatever room was left as the breadcrumb trail got longer/shorter,
+   which is exactly what made it look like it was drifting around instead
+   of staying in one place next to the actions, unlike the dashboard
+   toolbar's own layout switch. */
 .breadcrumbs {
   display: flex;
   gap: 4px;
   align-items: center;
   color: var(--text-dim);
   font-size: 0.88rem;
+  flex: 1;
+  min-width: 0;
 }
 
 .breadcrumbs button {
@@ -896,6 +1210,97 @@ button, input, select {
 
 .file-row-actions button:hover,
 .file-row-actions a:hover { color: var(--accent); }
+
+/* ---------- Files: thumbnail layout ---------- */
+
+.file-thumbnails {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 10px;
+  padding: 8px;
+}
+
+.file-thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: none;
+  font-family: inherit;
+}
+
+.file-thumb:hover { background: var(--bg-card-hover); border-color: var(--border); }
+
+.file-thumb-icon {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.1rem;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+
+.file-thumb-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.file-thumb-name {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  text-align: center;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Files: folder tree layout ---------- */
+
+.file-tree {
+  padding: 8px;
+  font-size: 0.85rem;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.tree-row:hover { background: var(--bg-card-hover); }
+.tree-row.active { background: var(--bg-card-hover); color: var(--accent); }
+
+.tree-toggle {
+  width: 14px;
+  flex-shrink: 0;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 0.65rem;
+}
+
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-children {
+  margin-left: 17px;
+  border-left: 1px solid var(--border);
+  padding-left: 6px;
+}
 
 /* ---------- Chat view ---------- */
 
@@ -980,6 +1385,82 @@ button, input, select {
   overflow: hidden;
 }
 
+/* ---------- Chat: Sidebar and Floating layouts ----------
+   These reflow the exact same channel-list markup Tabs uses (same
+   render/drag-reorder/add-channel code in app.js — only CSS changes
+   here) from a horizontal row above the conversation into a column
+   beside it, AI-chat-app style. Floating goes a step further and strips
+   the card chrome off the conversation itself, so messages sit directly
+   on the page background instead of inside a bordered panel. */
+
+.chat-layout.mode-sidebar,
+.chat-layout.mode-floating {
+  max-width: 960px;
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.chat-layout.mode-sidebar .chat-channels,
+.chat-layout.mode-floating .chat-channels {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  width: 200px;
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+
+.chat-layout.mode-sidebar .chat-main,
+.chat-layout.mode-floating .chat-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-layout.mode-sidebar .chat-channels {
+  background: var(--bg-card);
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 10px;
+}
+
+.chat-layout.mode-sidebar .chat-channel-tab,
+.chat-layout.mode-floating .chat-channel-tab {
+  width: 100%;
+  border-radius: 8px;
+  padding: 8px 10px 8px 12px;
+}
+
+/* Floating: no card background/border anywhere in the conversation, and
+   the channel list is bare text over the page instead of its own panel —
+   just the input pill, the bubbles, and a clean list beside them. */
+.chat-layout.mode-floating .chat-channels {
+  background: transparent;
+}
+
+.chat-layout.mode-floating .chat-channel-tab {
+  background: transparent;
+  border-color: transparent;
+}
+
+.chat-layout.mode-floating .chat-channel-tab.active {
+  background: var(--bg-card-hover);
+  border-color: var(--accent);
+}
+
+.chat-layout.mode-floating .chat-main {
+  background: transparent;
+  border: none;
+}
+
+.chat-layout.mode-floating .chat-header {
+  background: transparent;
+  border-bottom: none;
+}
+
+.chat-layout.mode-floating .chat-composer {
+  background: transparent;
+  border-top: none;
+}
+
 .chat-header {
   display: flex;
   align-items: center;
@@ -987,6 +1468,14 @@ button, input, select {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   font-weight: 700;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .chat-identity {
@@ -1055,6 +1544,52 @@ button, input, select {
 }
 
 .chat-message-text a { color: var(--accent); }
+
+/* ---------- Chat: bubbles layout ---------- */
+
+.chat-messages.mode-bubbles .chat-message {
+  display: flex;
+  flex-direction: column;
+  max-width: 75%;
+}
+
+.chat-messages.mode-bubbles .chat-message.own {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.chat-messages.mode-bubbles .chat-message.other {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.chat-messages.mode-bubbles .chat-message-meta { margin-bottom: 2px; }
+
+.chat-messages.mode-bubbles .chat-message-author {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.chat-messages.mode-bubbles .chat-message.own .chat-message-author { display: none; }
+
+.chat-messages.mode-bubbles .chat-message-text {
+  padding: 8px 12px;
+  border-radius: 16px;
+  background: var(--bg-elevated);
+  border-bottom-left-radius: 4px;
+}
+
+.chat-messages.mode-bubbles .chat-message.own .chat-message-text {
+  background: var(--accent);
+  color: white;
+  border-radius: 16px;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-messages.mode-bubbles .chat-message.own .chat-message-text a { color: white; text-decoration: underline; }
+
+.chat-messages.mode-bubbles .chat-message-time { font-size: 0.65rem; }
 
 .chat-attachment-image {
   display: block;
@@ -1287,6 +1822,49 @@ legend {
 
 .spacer { flex: 1; }
 
+.settings-card {
+  max-width: 640px;
+}
+
+.settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-tabs button {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 0.8rem;
+  padding: 6px 13px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.settings-tabs button:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.settings-tabs button.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.settings-tab-panel {
+  display: none;
+}
+
+.settings-tab-panel.active {
+  display: block;
+}
+
 .settings-section {
   border-top: 1px solid var(--border);
   padding-top: 14px;
@@ -1406,6 +1984,192 @@ legend {
 
 .group-row button:hover { color: var(--offline); }
 
+.devices-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.device-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.device-row .status-dot { flex-shrink: 0; }
+
+.device-info { flex: 1; min-width: 0; }
+
+.device-label {
+  font-size: 0.83rem;
+  font-weight: 700;
+}
+
+.device-meta {
+  font-size: 0.74rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.host-health {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.host-stat-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.host-stat-label span {
+  color: var(--text-faint);
+  font-size: 0.74rem;
+}
+
+.host-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.host-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+.host-bar-fill.online { background: var(--online); }
+.host-bar-fill.checking { background: var(--checking); }
+.host-bar-fill.offline { background: var(--offline); }
+
+.host-meta {
+  font-size: 0.76rem;
+  color: var(--text-faint);
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  line-height: 1.5;
+}
+
+.discovery-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.discovery-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.discovery-progress-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.discovery-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.discovery-progress span {
+  font-size: 0.74rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.discovery-results {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.discovery-device {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.discovery-device-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.discovery-ip {
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.discovery-hostname {
+  font-size: 0.78rem;
+  color: var(--text-faint);
+}
+
+.discovery-ports {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.discovery-port {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.discovery-port-label {
+  font-size: 0.8rem;
+}
+
+.discovery-port-number {
+  color: var(--text-faint);
+  font-size: 0.74rem;
+}
+
+.discovery-add-btn {
+  padding: 3px 10px;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.discovery-port.added .discovery-add-btn {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .inline-form {
   display: flex;
   gap: 8px;
@@ -1446,7 +2210,64 @@ legend {
 
 @media (max-width: 720px) {
   .toolbar { flex-wrap: wrap; }
-  #search { width: 140px; }
+
+  /* Search needs to actually be usable, not squeezed to near-nothing by
+     two buttons fighting it for space — it takes whatever's left, the
+     buttons drop their label text and become fixed-size icon squares
+     (same "icon-only on mobile" move as the FAB below), and nothing here
+     wraps onto a second line inside itself the way it did before. */
+  .toolbar-dashboard-controls { width: 100%; }
+  #search { flex: 1 1 auto; min-width: 0; width: auto; }
+  .toolbar-action-btn {
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .toolbar-action-btn .btn-label { display: none; }
+
+  /* The scan-progress line (bar + status text) was squeezed into
+     whatever was left beside "Scan network" and its nowrap text ran off
+     the edge of the modal — giving it the full row below the button
+     instead of squeezing next to it, and letting the text itself wrap,
+     fixes both. */
+  .discovery-controls { flex-wrap: wrap; }
+  .discovery-progress { flex: 1 1 100%; }
+  .discovery-progress span { white-space: normal; }
+
+  /* Side-by-side sidebar+conversation doesn't fit a phone screen — same
+     graceful-degrade real chat apps use, so it collapses back to a
+     horizontal scrollable strip above the conversation instead of a
+     column beside it, while keeping Floating's borderless look. */
+  .chat-layout.mode-sidebar,
+  .chat-layout.mode-floating {
+    flex-direction: column;
+  }
+  .chat-layout.mode-sidebar .chat-channels,
+  .chat-layout.mode-floating .chat-channels {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: 100%;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .chat-layout.mode-sidebar .chat-channel-tab,
+  .chat-layout.mode-floating .chat-channel-tab {
+    width: auto;
+    flex-shrink: 0;
+  }
+
+  /* Cramming the group filter chips into whatever's left of the row next
+     to the card/list/graph switch left almost no width for them, so most
+     wrapped one-per-line. Stacking the two onto their own full-width rows
+     gives the chips the whole row to pack into instead. */
+  .dashboard-toolbar { flex-direction: column; }
+  .group-filters { flex: none; width: 100%; }
+  .layout-switch { align-self: center; }
 
   /* The hero title is centered edge-to-edge, but hero-icons is pinned
      absolute top-right — reserving padding to dodge it turned out not to
@@ -1456,15 +2277,15 @@ legend {
   .hero {
     display: flex;
     flex-direction: column;
-    padding: 16px 16px 20px;
+    padding: 12px 16px 14px;
   }
   .hero-icons {
     position: static;
     align-self: flex-end;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
   }
-  .brand { font-size: 1.4rem; }
-  .subtitle { font-size: 0.84rem; }
+  .brand { font-size: 1.2rem; }
+  .subtitle { font-size: 0.76rem; }
 
   /* No physical keyboard to press / on — this hint has no affordance on
      touch, so it's just clutter. The omnibox is still reachable by other
@@ -1504,4 +2325,48 @@ legend {
   .pin-toggle { padding: 6px; font-size: 1.1rem; }
   .chat-message-delete,
   .delete-channel-btn { padding: 4px; }
+}
+
+.login-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login-card {
+  text-align: center;
+}
+
+.login-card label {
+  display: block;
+  text-align: left;
+  margin-top: 18px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.login-card input {
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.95rem;
+  box-sizing: border-box;
+}
+
+.login-card .btn {
+  width: 100%;
+  margin-top: 18px;
+}
+
+.login-error {
+  margin: 14px 0 0;
+  color: var(--offline);
+  font-size: 0.85rem;
 }

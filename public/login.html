@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mission Control — Sign in</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('mc:theme');
+        if (saved) document.documentElement.setAttribute('data-theme', saved);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="icon" href="/icons/favicon.png" type="image/png" />
+</head>
+<body>
+  <div class="login-wrap">
+    <form id="loginForm" class="modal-card login-card">
+      <div class="brand">🛰️ Mission Control</div>
+      <p class="subtitle">This dashboard is password-protected.</p>
+      <label>Password
+        <input name="password" type="password" autocomplete="current-password" autofocus required />
+      </label>
+      <p id="loginError" class="login-error hidden"></p>
+      <button type="submit" class="btn primary">Sign in</button>
+    </form>
+  </div>
+  <script type="module" src="/js/login.js"></script>
+</body>
+</html>

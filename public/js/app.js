@@ -23,9 +23,22 @@ const state = {
   chatMessages: new Map(),
   chatUnseen: 0,
   highlightedServiceId: null,
+  revealedUrls: new Set(),
+  revealedDeviceIps: new Set(),
+  dashboardViewMode: localStorage.getItem('mc:dashboardView') || 'card', // per-device only — never synced, never in config.json
+  filesViewMode: localStorage.getItem('mc:filesView') || 'list',
+  // 'tabs' (channels above, today's layout) | 'sidebar' (channel list
+  // beside the conversation) | 'floating' (borderless bubbles over the
+  // page). Guards against a stale 'default'/'bubbles'/'compact' value
+  // from before these were whole-layout switches, not just message styles.
+  chatViewMode: ['tabs', 'sidebar', 'floating'].includes(localStorage.getItem('mc:chatView'))
+    ? localStorage.getItem('mc:chatView')
+    : 'tabs',
+  settingsTab: localStorage.getItem('mc:settingsTab') || 'appearance',
 };
 
 const cardsById = new Map();
+const graphNodesById = new Map();
 
 const el = (id) => document.getElementById(id);
 const svgOverlay = el('connectionsOverlay');
@@ -40,6 +53,30 @@ function toast(message, isError = false) {
   t.style.borderColor = isError ? 'var(--offline)' : 'var(--border)';
   clearTimeout(toast._timer);
   toast._timer = setTimeout(() => t.classList.add('hidden'), 3200);
+}
+
+// navigator.clipboard only exists in a secure context (https:// or
+// localhost) — a device opening this over a plain-HTTP LAN address (the
+// normal way to reach this app from a phone) doesn't have it at all, so
+// the modern API silently fails there. This falls back to the old
+// execCommand trick, which has no such restriction.
+async function copyToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  try {
+    if (!document.execCommand('copy')) throw new Error('copy command was blocked');
+  } finally {
+    document.body.removeChild(textarea);
+  }
 }
 
 // ---------- Data loading ----------
@@ -152,6 +189,10 @@ el('viewSwitch').addEventListener('click', (e) => {
   const view = btn.dataset.view;
   for (const v of document.querySelectorAll('.view')) v.classList.remove('active');
   el(`${view}View`).classList.add('active');
+  // Search/Connections/Discover all act on the service grid — dead
+  // controls on Files/Chat, so they only take up toolbar space on
+  // Dashboard.
+  el('toolbarDashboardControls').classList.toggle('hidden', view !== 'dashboard');
   if (view === 'files') renderFiles();
   if (view === 'chat') {
     state.chatUnseen = 0;
@@ -268,7 +309,7 @@ function buildCardElement(service, adjacency) {
         <button class="pin-toggle ${service.pinned ? 'pinned' : ''}" title="${service.pinned ? 'Unpin' : 'Pin to top'}">${service.pinned ? '★' : '☆'}</button>
         <div class="card-title">${escapeHtml(service.name)}</div>
       </div>
-      <div class="card-url">${escapeHtml(service.url)}</div>
+      <button type="button" class="card-url ${state.revealedUrls.has(service.id) ? 'revealed' : ''}">${state.revealedUrls.has(service.id) ? escapeHtml(service.url) : '🔒 Tap to reveal URL'}</button>
       <div class="card-meta">
         <span class="status-text">${sl.text}</span>
         ${group ? `<span class="card-group-badge" style="background:${group.color}22;color:${group.color}">${escapeHtml(group.name)}</span>` : ''}
@@ -284,6 +325,7 @@ function buildCardElement(service, adjacency) {
         <button class="icon-btn copy-btn" title="Copy link">📋</button>
         <a class="enter-btn" href="${escapeAttr(service.url)}" target="_blank" rel="noopener">Enter</a>
         <button class="icon-btn recheck-btn" title="Check now">⟳</button>
+        ${service.mac ? '<button class="icon-btn wake-btn" title="Send a Wake-on-LAN packet">⚡</button>' : ''}
       </div>
     </div>
   `;
@@ -312,10 +354,24 @@ function buildCardElement(service, adjacency) {
     }
   });
 
+  card.querySelector('.card-url').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const urlBtn = e.currentTarget;
+    if (state.revealedUrls.has(service.id)) {
+      state.revealedUrls.delete(service.id);
+      urlBtn.textContent = '🔒 Tap to reveal URL';
+      urlBtn.classList.remove('revealed');
+    } else {
+      state.revealedUrls.add(service.id);
+      urlBtn.textContent = service.url;
+      urlBtn.classList.add('revealed');
+    }
+  });
+
   card.querySelector('.copy-btn').addEventListener('click', async (e) => {
     e.stopPropagation();
     try {
-      await navigator.clipboard.writeText(service.url);
+      await copyToClipboard(service.url);
       toast('Link copied');
     } catch {
       toast('Could not copy link', true);
@@ -332,6 +388,20 @@ function buildCardElement(service, adjacency) {
         state.status.set(service.id, updated);
         renderCardStatuses();
       }
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      btn.classList.remove('spinning');
+    }
+  });
+
+  card.querySelector('.wake-btn')?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const btn = e.currentTarget;
+    btn.classList.add('spinning');
+    try {
+      await api.wakeService(service.id);
+      toast(`Wake packet sent to ${service.name}`);
     } catch (err) {
       toast(err.message, true);
     } finally {
@@ -379,7 +449,26 @@ function toggleHighlight(serviceId) {
   highlightNeighbors(cardsById, adjacency, serviceId);
 }
 
+// ---------- Dashboard layout switcher (Card / List / Graph) ----------
+// Per-device only (localStorage) — never touches config.json, so it never
+// syncs to or overrides another device's view.
+
+function setDashboardLayoutVisibility(mode) {
+  cardGrid.classList.toggle('hidden', mode !== 'card');
+  el('servicesListView').classList.toggle('hidden', mode !== 'list');
+  el('servicesGraphView').classList.toggle('hidden', mode !== 'graph');
+  if (mode !== 'card') el('pinnedSection').classList.add('hidden');
+  svgOverlay.classList.toggle('visible', mode === 'card' && state.connectionsVisible);
+}
+
 function renderCards() {
+  setDashboardLayoutVisibility(state.dashboardViewMode);
+  if (state.dashboardViewMode === 'list') renderServicesListView();
+  else if (state.dashboardViewMode === 'graph') renderServicesGraphView();
+  else renderServicesCardView();
+}
+
+function renderServicesCardView() {
   cardGrid.innerHTML = '';
   pinnedGrid.innerHTML = '';
   cardsById.clear();
@@ -412,15 +501,119 @@ function renderCards() {
   if (state.connectionsVisible) requestAnimationFrame(renderConnectionOverlay);
 }
 
-function renderCardStatuses() {
-  for (const [id, card] of cardsById) {
-    const status = state.status.get(id);
+function rowFaviconOrIcon(service) {
+  if (service.icon) return escapeHtml(service.icon);
+  const url = faviconUrl(service.url);
+  return url ? `<img src="${escapeAttr(url)}" alt="" />` : '🔗';
+}
+
+function renderServicesListView() {
+  const wrap = el('servicesListView');
+  wrap.innerHTML = '';
+
+  const services = filteredServices().slice().sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+  el('emptyState').classList.toggle('hidden', services.length > 0);
+
+  for (const service of services) {
+    const group = groupById(service.group);
+    const status = state.status.get(service.id);
     const sl = statusLabel(status);
-    const dot = card.querySelector('.status-dot');
-    dot.className = `status-dot ${sl.cls}`;
-    dot.title = sl.text;
-    card.querySelector('.status-text').textContent = sl.text;
-    renderUptimeStrip(card, status);
+
+    const row = document.createElement('div');
+    row.className = 'service-row';
+    row.dataset.id = service.id;
+    row.innerHTML = `
+      <span class="status-dot ${sl.cls}" title="${sl.text}"></span>
+      <span class="row-icon">${rowFaviconOrIcon(service)}</span>
+      ${service.pinned ? '<span class="row-star" title="Pinned">★</span>' : ''}
+      <span class="row-name">${escapeHtml(service.name)}</span>
+      <span class="row-meta">${sl.text}${group ? ' · ' + escapeHtml(group.name) : ''}${service.description ? ' · ' + escapeHtml(service.description) : ''}</span>
+      <span class="row-uptime">${status?.uptimePercent != null ? status.uptimePercent + '%' : '—'}</span>
+      <span class="row-actions">
+        <button type="button" class="icon-btn row-edit-btn" title="Edit">✎</button>
+        ${service.mac ? '<button type="button" class="icon-btn row-wake-btn" title="Send a Wake-on-LAN packet">⚡</button>' : ''}
+        <a class="icon-btn row-enter-btn" href="${escapeAttr(service.url)}" target="_blank" rel="noopener" title="Enter">↗</a>
+      </span>
+    `;
+    row.querySelector('.row-edit-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openServiceModal(service.id);
+    });
+    row.querySelector('.row-wake-btn')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        await api.wakeService(service.id);
+        toast(`Wake packet sent to ${service.name}`);
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+    wrap.appendChild(row);
+  }
+}
+
+function renderServicesGraphView() {
+  const container = el('graphNodes');
+  const svg = el('graphOverlay');
+  const graphView = el('servicesGraphView');
+  container.innerHTML = '';
+  graphNodesById.clear();
+
+  const services = filteredServices();
+  el('emptyState').classList.toggle('hidden', services.length > 0);
+  if (services.length === 0) {
+    svg.innerHTML = '';
+    return;
+  }
+
+  const rect = graphView.getBoundingClientRect();
+  const cx = rect.width / 2;
+  const cy = rect.height / 2;
+  const radius = Math.max(60, Math.min(cx, cy) - 70);
+
+  services.forEach((service, i) => {
+    const angle = (i / services.length) * 2 * Math.PI - Math.PI / 2;
+    const x = cx + radius * Math.cos(angle);
+    const y = cy + radius * Math.sin(angle);
+    const status = state.status.get(service.id);
+    const sl = statusLabel(status);
+
+    const node = document.createElement('div');
+    node.className = `graph-node ${sl.cls} ${service.pinned ? 'pinned' : ''}`;
+    node.dataset.id = service.id;
+    node.style.left = `${x}px`;
+    node.style.top = `${y}px`;
+    node.title = `${service.name} — ${sl.text}`;
+    node.innerHTML = `
+      <div class="graph-node-icon">${rowFaviconOrIcon(service)}</div>
+      <div class="graph-node-label">${escapeHtml(service.name)}</div>
+    `;
+    node.addEventListener('click', () => window.open(service.url, '_blank', 'noopener'));
+
+    container.appendChild(node);
+    graphNodesById.set(service.id, node);
+  });
+
+  drawConnectionLines(svg, graphView, state.config.connections, graphNodesById);
+}
+
+function renderCardStatuses() {
+  if (state.dashboardViewMode === 'card') {
+    for (const [id, card] of cardsById) {
+      const status = state.status.get(id);
+      const sl = statusLabel(status);
+      const dot = card.querySelector('.status-dot');
+      dot.className = `status-dot ${sl.cls}`;
+      dot.title = sl.text;
+      card.querySelector('.status-text').textContent = sl.text;
+      renderUptimeStrip(card, status);
+    }
+  } else {
+    // List/graph rows have no per-item local UI state worth preserving
+    // (no drag handles, no reveal-toggle, nothing mid-interaction), so a
+    // full rebuild on every status update is simpler than teaching two
+    // more layouts to patch themselves in place.
+    renderCards();
   }
   renderOnlineBadge();
 }
@@ -440,13 +633,153 @@ function renderConnectionOverlay() {
 el('toggleConnections').addEventListener('click', () => {
   state.connectionsVisible = !state.connectionsVisible;
   el('toggleConnections').classList.toggle('active', state.connectionsVisible);
-  svgOverlay.classList.toggle('visible', state.connectionsVisible);
+  svgOverlay.classList.toggle('visible', state.dashboardViewMode === 'card' && state.connectionsVisible);
   if (state.connectionsVisible) {
     renderConnectionOverlay();
     if (!localStorage.getItem('mc:seenConnectionsHint')) {
       toast('Tap a card with a 🔗 badge to see what it’s connected to');
       localStorage.setItem('mc:seenConnectionsHint', 'true');
     }
+  }
+});
+
+el('dashboardLayoutSwitch').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-layout]');
+  if (!btn) return;
+  state.dashboardViewMode = btn.dataset.layout;
+  localStorage.setItem('mc:dashboardView', state.dashboardViewMode);
+  el('dashboardLayoutSwitch').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
+  renderCards();
+});
+
+// ---------- Network discovery ----------
+// The browser can't open raw TCP sockets itself, so the actual subnet scan
+// runs server-side (server/discovery.js); this just kicks it off and polls
+// its progress while the modal is open. Ports that look like a specific
+// known app (Jellyfin, Ollama, etc.) suggest that name; generic ports
+// (plain HTTP/HTTPS/SSH/...) suggest the bare IP instead, since "HTTP"
+// isn't a useful service name.
+
+const discoveryModal = el('discoveryModal');
+const GENERIC_PORT_LABEL_RE = /^(HTTP|HTTPS|SSH|SMB|RDP|Web \(|Port )/;
+let discoveryPollTimer = null;
+
+function existingServiceEndpoints() {
+  const set = new Set();
+  for (const s of state.config.services) {
+    try {
+      const { hostname, port, protocol } = new URL(s.url);
+      set.add(`${hostname}:${port || (protocol === 'https:' ? '443' : '80')}`);
+    } catch {
+      // malformed/incomplete URL on an existing entry — just skip it for this check
+    }
+  }
+  return set;
+}
+
+function guessServiceUrl(ip, port) {
+  return port === 443 || port === 8443 ? `https://${ip}:${port}` : `http://${ip}:${port}`;
+}
+
+function renderDiscoveryResults(scan) {
+  const wrap = el('discoveryResults');
+  const progress = el('discoveryProgress');
+
+  progress.classList.toggle('hidden', !scan.total);
+  if (scan.total) {
+    const pct = Math.round((scan.progress / scan.total) * 100);
+    el('discoveryProgressFill').style.width = `${pct}%`;
+    el('discoveryProgressLabel').textContent = scan.running
+      ? `Scanning… ${scan.progress}/${scan.total} addresses (${scan.results.length} found)`
+      : `Done — checked ${scan.total} addresses, found ${scan.results.length}`;
+  }
+
+  el('startScanBtn').disabled = scan.running;
+  el('startScanBtn').textContent = scan.running ? 'Scanning…' : 'Scan network';
+
+  if (scan.error) {
+    wrap.innerHTML = `<p class="empty-state">${escapeHtml(scan.error)}</p>`;
+    return;
+  }
+
+  if (!scan.results.length) {
+    wrap.innerHTML = scan.running
+      ? '<p class="empty-state">Looking for devices…</p>'
+      : '<p class="empty-state">No scan yet — click "Scan network" to look for devices on your LAN.</p>';
+    return;
+  }
+
+  const existing = existingServiceEndpoints();
+
+  wrap.innerHTML = scan.results.map((device) => `
+    <div class="discovery-device">
+      <div class="discovery-device-header">
+        <span class="discovery-ip">${escapeHtml(device.ip)}</span>
+        ${device.hostname ? `<span class="discovery-hostname">${escapeHtml(device.hostname)}</span>` : ''}
+        ${device.mac ? `<span class="discovery-hostname" title="Found in this machine's ARP cache — enables one-click Wake-on-LAN when added">📡 ${escapeHtml(device.mac)}</span>` : ''}
+      </div>
+      <div class="discovery-ports">
+        ${device.ports.map((p) => {
+          const added = existing.has(`${device.ip}:${p.port}`);
+          return `
+            <div class="discovery-port ${added ? 'added' : ''}">
+              <span class="discovery-port-label">${escapeHtml(p.label)} <span class="discovery-port-number">:${p.port}</span></span>
+              <button type="button" class="btn ghost discovery-add-btn" data-ip="${escapeAttr(device.ip)}" data-port="${p.port}" data-label="${escapeAttr(p.label)}" data-mac="${escapeAttr(device.mac || '')}" ${added ? 'disabled' : ''}>${added ? 'Added' : '+ Add'}</button>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `).join('');
+
+  wrap.querySelectorAll('.discovery-add-btn:not(:disabled)').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const { ip, port, label, mac } = btn.dataset;
+      closeDiscoveryModal();
+      openServiceModal(null, {
+        name: GENERIC_PORT_LABEL_RE.test(label) ? ip : label,
+        url: guessServiceUrl(ip, Number(port)),
+        mac,
+      });
+    });
+  });
+}
+
+async function refreshDiscoveryState() {
+  try {
+    const scan = await api.getDiscoveryScan();
+    renderDiscoveryResults(scan);
+    if (!scan.running && discoveryPollTimer) {
+      clearInterval(discoveryPollTimer);
+      discoveryPollTimer = null;
+    }
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+function openDiscoveryModal() {
+  discoveryModal.classList.remove('hidden');
+  refreshDiscoveryState();
+}
+
+function closeDiscoveryModal() {
+  discoveryModal.classList.add('hidden');
+  clearInterval(discoveryPollTimer);
+  discoveryPollTimer = null;
+}
+
+el('openDiscovery').addEventListener('click', openDiscoveryModal);
+el('closeDiscoveryBtn').addEventListener('click', closeDiscoveryModal);
+discoveryModal.addEventListener('click', (e) => { if (e.target === discoveryModal) closeDiscoveryModal(); });
+
+el('startScanBtn').addEventListener('click', async () => {
+  try {
+    const scan = await api.startDiscoveryScan();
+    renderDiscoveryResults(scan);
+    if (!discoveryPollTimer) discoveryPollTimer = setInterval(refreshDiscoveryState, 1000);
+  } catch (err) {
+    toast(err.message, true);
   }
 });
 
@@ -542,7 +875,8 @@ enableDragReorder(pinnedGrid, {
 });
 
 window.addEventListener('resize', () => {
-  if (state.connectionsVisible) renderConnectionOverlay();
+  if (state.dashboardViewMode === 'card' && state.connectionsVisible) renderConnectionOverlay();
+  if (state.dashboardViewMode === 'graph') renderServicesGraphView();
 });
 
 function escapeHtml(str) {
@@ -604,7 +938,7 @@ function populateConnectionsChecklist(currentId) {
   `).join('');
 }
 
-function openServiceModal(serviceId = null) {
+function openServiceModal(serviceId = null, prefill = null) {
   state.editingServiceId = serviceId;
   populateGroupSelect();
   serviceForm.reset();
@@ -622,9 +956,19 @@ function openServiceModal(serviceId = null) {
     serviceForm.elements.tags.value = (s.tags || []).join(', ');
     serviceForm.elements.healthCheck.checked = s.healthCheck;
     serviceForm.elements.healthCheckPath.value = s.healthCheckPath || '/';
+    serviceForm.elements.mac.value = s.mac || '';
   } else {
     el('serviceModalTitle').textContent = 'Add Service';
     serviceForm.elements.healthCheckPath.value = '/';
+    // Used by the network discovery flow to hand off a found ip:port (and,
+    // when the OS's ARP cache had it, a MAC address for Wake-on-LAN) —
+    // otherwise every other "Add Service" path leaves this null.
+    if (prefill) {
+      serviceForm.elements.name.value = prefill.name || '';
+      serviceForm.elements.url.value = prefill.url || '';
+      serviceForm.elements.mac.value = prefill.mac || '';
+      serviceForm.elements.healthCheck.checked = isLocalUrl(prefill.url || '');
+    }
   }
 
   populateConnectionsChecklist(serviceId);
@@ -652,6 +996,7 @@ serviceForm.addEventListener('submit', async (e) => {
     tags: fd.get('tags').split(',').map((t) => t.trim()).filter(Boolean),
     healthCheck: fd.get('healthCheck') === 'on',
     healthCheckPath: fd.get('healthCheckPath').trim() || '/',
+    mac: fd.get('mac').trim(),
   };
 
   try {
@@ -718,6 +1063,10 @@ const THEMES = [
   { id: 'forest', name: 'Forest', bg: '#0f1710', accent: '#43a047' },
   { id: 'ocean', name: 'Ocean', bg: '#071620', accent: '#22b8cf' },
   { id: 'matrix', name: 'Matrix', bg: '#000502', accent: '#00ff41' },
+  { id: 'nord', name: 'Nord', bg: '#2e3440', accent: '#88c0d0' },
+  { id: 'sunset', name: 'Sunset', bg: '#1a0f1f', accent: '#ff7e5f' },
+  { id: 'vaporwave', name: 'Vaporwave', bg: '#100a24', accent: '#ff71ce' },
+  { id: 'mono', name: 'Mono', bg: '#121212', accent: '#ffffff' },
 ];
 
 function applyTheme(themeId) {
@@ -775,6 +1124,272 @@ function renderGroupsList() {
   });
 }
 
+// Device list is fetched fresh on open and refreshed on a short poll only
+// while the modal is actually visible — no point tracking a timer in the
+// background for a panel nobody's looking at.
+let settingsPollTimer = null;
+
+function renderDevicesList(devices) {
+  const wrap = el('devicesList');
+  if (!devices.length) {
+    wrap.innerHTML = '<p style="color:var(--text-faint);font-size:0.85rem;margin:0;">No devices recorded yet.</p>';
+    return;
+  }
+  wrap.innerHTML = devices.map((d) => {
+    const ipRevealed = state.revealedDeviceIps.has(d.ip);
+    const ipLabel = ipRevealed ? escapeHtml(d.ip) : '🔒 tap to reveal';
+    return `
+      <div class="device-row">
+        <span class="status-dot ${d.online ? 'online' : 'unmonitored'}" title="${d.online ? 'Connected right now' : 'Not currently connected'}"></span>
+        <div class="device-info">
+          <div class="device-label">${escapeHtml(d.label)}</div>
+          <div class="device-meta"><button type="button" class="device-ip-toggle" data-ip="${escapeAttr(d.ip)}">${ipLabel}</button> · last seen ${timeAgo(d.lastSeen)} · ${d.requestCount} request${d.requestCount === 1 ? '' : 's'}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  wrap.querySelectorAll('.device-ip-toggle').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const ip = btn.dataset.ip;
+      if (state.revealedDeviceIps.has(ip)) {
+        state.revealedDeviceIps.delete(ip);
+        btn.textContent = '🔒 tap to reveal';
+      } else {
+        state.revealedDeviceIps.add(ip);
+        btn.textContent = ip;
+      }
+    });
+  });
+}
+
+async function loadAndRenderDevices() {
+  try {
+    const { devices } = await api.getDevices();
+    renderDevicesList(devices);
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+function healthBarClass(percent) {
+  if (percent >= 85) return 'offline';
+  if (percent >= 60) return 'checking';
+  return 'online';
+}
+
+function formatGB(bytes) {
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
+function formatUptime(seconds) {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return [d && `${d}d`, h && `${h}h`, `${m}m`].filter(Boolean).join(' ');
+}
+
+// Renders the full breakdown into whichever element id is passed in — used
+// by both the standalone Host Health modal (see below) and, previously,
+// the now-removed Settings section, kept parametrized in case a second
+// full view ever wants it again.
+function renderHostHealth(targetId, h) {
+  const wrap = el(targetId);
+  if (!h) {
+    wrap.innerHTML = '<p style="color:var(--text-faint);font-size:0.85rem;margin:0;">Host stats unavailable.</p>';
+    return;
+  }
+
+  const memPercent = Math.round((h.memory.used / h.memory.total) * 100);
+  const diskPercent = h.disk ? Math.round((h.disk.used / h.disk.total) * 100) : null;
+
+  wrap.innerHTML = `
+    <div class="host-stat">
+      <div class="host-stat-label">CPU <span>${h.cpuPercent}%</span></div>
+      <div class="host-bar"><div class="host-bar-fill ${healthBarClass(h.cpuPercent)}" style="width:${h.cpuPercent}%"></div></div>
+    </div>
+    <div class="host-stat">
+      <div class="host-stat-label">Memory <span>${formatGB(h.memory.used)} / ${formatGB(h.memory.total)}</span></div>
+      <div class="host-bar"><div class="host-bar-fill ${healthBarClass(memPercent)}" style="width:${memPercent}%"></div></div>
+    </div>
+    ${h.disk ? `
+    <div class="host-stat">
+      <div class="host-stat-label">Disk (${escapeHtml(h.disk.path)}) <span>${formatGB(h.disk.used)} / ${formatGB(h.disk.total)}</span></div>
+      <div class="host-bar"><div class="host-bar-fill ${healthBarClass(diskPercent)}" style="width:${diskPercent}%"></div></div>
+    </div>` : ''}
+    <div class="host-meta">
+      ${escapeHtml(h.hostname)} · ${escapeHtml(h.platform)} (${escapeHtml(h.arch)}) · ${escapeHtml(h.cpuModel)} · ${h.cpuCount} cores · up ${formatUptime(h.uptimeSeconds)}
+    </div>
+  `;
+}
+
+// The always-visible hero pill — shows just the CPU figure (the single
+// number people actually glance at) color-coded to the same thresholds as
+// the full bars, so a problem is visible without opening anything.
+function renderHostHealthQuick(h) {
+  const btn = el('openHostHealth');
+  btn.classList.remove('online', 'checking', 'offline');
+  if (!h) {
+    btn.textContent = '🖥️ …';
+    return;
+  }
+  btn.textContent = `🖥️ ${h.cpuPercent}%`;
+  btn.classList.add(healthBarClass(h.cpuPercent));
+  btn.title = `Host PC Health — CPU ${h.cpuPercent}%`;
+}
+
+// One poll loop, always running (started in the boot section below) —
+// the hero pill needs live data on every tab regardless of whether the
+// modal is open, and the modal (when it is open) just piggybacks on the
+// same 5s tick instead of running a second timer alongside it.
+let lastHostHealth = null;
+
+async function pollHostHealth() {
+  try {
+    lastHostHealth = await api.getHostHealth();
+  } catch {
+    lastHostHealth = null;
+  }
+  renderHostHealthQuick(lastHostHealth);
+  if (!hostHealthModal.classList.contains('hidden')) {
+    renderHostHealth('hostHealthFull', lastHostHealth);
+  }
+}
+
+const hostHealthModal = el('hostHealthModal');
+
+function openHostHealthModal() {
+  hostHealthModal.classList.remove('hidden');
+  renderHostHealth('hostHealthFull', lastHostHealth);
+}
+
+function closeHostHealthModal() {
+  hostHealthModal.classList.add('hidden');
+}
+
+el('openHostHealth').addEventListener('click', openHostHealthModal);
+el('closeHostHealthBtn').addEventListener('click', closeHostHealthModal);
+hostHealthModal.addEventListener('click', (e) => { if (e.target === hostHealthModal) closeHostHealthModal(); });
+
+// ---------- Security (password gate) ----------
+// state.config.auth only ever carries { enabled } — the server strips the
+// salt/hash before this ever reaches a browser (see config.js
+// sanitizeConfig), so there's nothing sensitive to guard client-side here.
+
+function renderAuthSection() {
+  const enabled = state.config.auth.enabled;
+  el('authStatusText').textContent = enabled
+    ? '🔒 Password protection is ON for this app.'
+    : '🔓 Password protection is OFF — anyone who can reach this server has full access.';
+  el('setPasswordBtn').textContent = enabled ? 'Change password' : 'Set password & enable';
+  el('disableAuthBtn').classList.toggle('hidden', !enabled);
+  el('logoutBtn').classList.toggle('hidden', !enabled);
+  el('setPasswordForm').reset();
+  el('passwordError').classList.add('hidden');
+  el('sessionDaysInput').value = state.config.auth.sessionDays;
+  el('ipAllowlistEnabled').checked = state.config.security.ipAllowlist.enabled;
+  el('ipAllowlistSubnets').value = state.config.security.ipAllowlist.subnets.join('\n');
+  el('ipAllowlistError').classList.add('hidden');
+}
+
+el('saveIpAllowlistBtn').addEventListener('click', async () => {
+  const errorEl = el('ipAllowlistError');
+  errorEl.classList.add('hidden');
+  const subnets = el('ipAllowlistSubnets').value.split('\n').map((s) => s.trim()).filter(Boolean);
+
+  try {
+    await api.updateSettings({
+      security: { ipAllowlist: { enabled: el('ipAllowlistEnabled').checked, subnets } },
+    });
+    await loadAll();
+    renderAuthSection();
+    toast('IP allowlist saved');
+  } catch (err) {
+    errorEl.textContent = err.message;
+    errorEl.classList.remove('hidden');
+  }
+});
+
+el('saveSessionDaysBtn').addEventListener('click', async () => {
+  const days = Number(el('sessionDaysInput').value);
+  try {
+    await api.setSessionLength(days);
+    await loadAll();
+    toast('Session length saved');
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+
+el('setPasswordForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errorEl = el('passwordError');
+  errorEl.classList.add('hidden');
+  const fd = new FormData(e.target);
+  const password = fd.get('password');
+  const confirm = fd.get('confirm');
+
+  if (password.length < 8) {
+    errorEl.textContent = 'Password must be at least 8 characters.';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+  if (password !== confirm) {
+    errorEl.textContent = "Passwords don't match.";
+    errorEl.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    await api.setPassword(password);
+    await loadAll();
+    renderAuthSection();
+    toast('Password protection enabled');
+  } catch (err) {
+    errorEl.textContent = err.message;
+    errorEl.classList.remove('hidden');
+  }
+});
+
+el('disableAuthBtn').addEventListener('click', async () => {
+  if (!confirm('Disable password protection? Anyone who can reach this server will have full access again.')) return;
+  try {
+    await api.disableAuth();
+    await loadAll();
+    renderAuthSection();
+    toast('Password protection disabled');
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+
+el('logoutBtn').addEventListener('click', async () => {
+  try {
+    await api.logout();
+  } catch {
+    // even if the request fails, still send the browser to the login page
+  }
+  window.location.href = '/login.html';
+});
+
+// ---------- Settings tabs ----------
+// Per-device only (localStorage), same as the dashboard/files/chat layout
+// switchers — which department you were last looking at isn't something
+// worth syncing across devices.
+
+function applySettingsTab(tab) {
+  state.settingsTab = tab;
+  localStorage.setItem('mc:settingsTab', tab);
+  el('settingsTabs').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.settings-tab-panel').forEach((p) => p.classList.toggle('active', p.dataset.tabPanel === tab));
+}
+
+el('settingsTabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-tab]');
+  if (!btn) return;
+  applySettingsTab(btn.dataset.tab);
+});
+
 function openSettingsModal() {
   renderGroupsList();
   el('notifyToggle').checked = state.notificationsEnabled;
@@ -784,7 +1399,20 @@ function openSettingsModal() {
   el('sharedPath').value = state.config.sharedFolder.path;
   el('sharedAllowUpload').checked = state.config.sharedFolder.allowUpload;
   el('sharedAllowDelete').checked = state.config.sharedFolder.allowDelete;
+  el('alertsEnabled').checked = state.config.alerts.enabled;
+  el('alertsWebhookUrl').value = state.config.alerts.webhookUrl;
+  el('alertsFormat').value = state.config.alerts.format;
+  renderAuthSection();
+  applySettingsTab(state.settingsTab);
   settingsModal.classList.remove('hidden');
+  loadAndRenderDevices();
+  settingsPollTimer = setInterval(loadAndRenderDevices, 5000);
+}
+
+function closeSettingsModal() {
+  settingsModal.classList.add('hidden');
+  clearInterval(settingsPollTimer);
+  settingsPollTimer = null;
 }
 
 el('notifyToggle').addEventListener('change', async (e) => {
@@ -792,6 +1420,16 @@ el('notifyToggle').addEventListener('change', async (e) => {
   if (checkbox.checked) {
     if (typeof Notification === 'undefined') {
       toast('Desktop notifications are not supported in this browser', true);
+      checkbox.checked = false;
+      return;
+    }
+    // Notification.requestPermission() silently auto-denies on a plain
+    // HTTP LAN address (only https:// or localhost qualify) — checking
+    // this first gives an actionable reason instead of the generic
+    // "permission not granted" a device would otherwise get for something
+    // that was never actually offered to them.
+    if (!window.isSecureContext) {
+      toast('Desktop notifications need HTTPS or localhost — this device is on a plain LAN address, so only in-page toasts will show', true);
       checkbox.checked = false;
       return;
     }
@@ -807,8 +1445,76 @@ el('notifyToggle').addEventListener('change', async (e) => {
 });
 
 el('openSettings').addEventListener('click', openSettingsModal);
-el('closeSettingsBtn').addEventListener('click', () => settingsModal.classList.add('hidden'));
-settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) settingsModal.classList.add('hidden'); });
+el('closeSettingsBtn').addEventListener('click', closeSettingsModal);
+settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) closeSettingsModal(); });
+
+el('sendTestAlertBtn').addEventListener('click', async () => {
+  const btn = el('sendTestAlertBtn');
+  const webhookUrl = el('alertsWebhookUrl').value.trim();
+  if (!webhookUrl) {
+    toast('Enter a webhook URL first', true);
+    return;
+  }
+  // Tests against whatever is currently *saved*, not the unsaved form
+  // field — save first if the URL was just typed in, otherwise this would
+  // silently test the old one.
+  btn.disabled = true;
+  try {
+    await api.updateSettings({ alerts: { enabled: el('alertsEnabled').checked, webhookUrl, format: el('alertsFormat').value } });
+    await api.testAlert();
+    toast('Test alert sent — check your webhook destination');
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ---------- Config export/import ----------
+// Export is a plain link (server sets Content-Disposition), so there's
+// nothing to wire up for it beyond the href already in the markup. Import
+// reads the file client-side and posts the parsed JSON — a wholesale
+// replace, so this is the one confirm() in Settings guarding something
+// that can't be undone without a backup of its own.
+
+el('importConfigBtn').addEventListener('click', () => el('importConfigInput').click());
+
+el('importConfigInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(await file.text());
+  } catch {
+    toast('That file isn\'t valid JSON', true);
+    return;
+  }
+
+  if (!confirm('Import this config? It replaces every service, group, connection, and chat channel currently configured — for every device, not just this one. This can\'t be undone unless you have your own backup.')) {
+    return;
+  }
+
+  try {
+    const result = await api.importConfig(parsed);
+    closeSettingsModal();
+    await loadAll();
+    toast(`Imported ${result.serviceCount} service${result.serviceCount === 1 ? '' : 's'}`);
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+
+el('clearDevicesBtn').addEventListener('click', async () => {
+  if (!confirm('Clear device history? Devices currently connected stay listed.')) return;
+  try {
+    await api.clearDevices();
+    loadAndRenderDevices();
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
 
 el('addGroupForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -836,8 +1542,13 @@ el('saveSettingsBtn').addEventListener('click', async () => {
         allowUpload: el('sharedAllowUpload').checked,
         allowDelete: el('sharedAllowDelete').checked,
       },
+      alerts: {
+        enabled: el('alertsEnabled').checked,
+        webhookUrl: el('alertsWebhookUrl').value.trim(),
+        format: el('alertsFormat').value,
+      },
     });
-    settingsModal.classList.add('hidden');
+    closeSettingsModal();
     await loadAll();
     toast('Settings saved');
   } catch (err) {
@@ -881,62 +1592,208 @@ function formatSize(bytes) {
   return `${val.toFixed(1)} ${units[i]}`;
 }
 
+// ---------- Files layout switcher (List / Thumbnail / Tree) ----------
+// Per-device only (localStorage), same as the dashboard's.
+
+function setFilesLayoutVisibility(mode) {
+  el('fileListTable').classList.toggle('hidden', mode !== 'list');
+  el('fileThumbnailView').classList.toggle('hidden', mode !== 'thumbnail');
+  el('fileTreeView').classList.toggle('hidden', mode !== 'tree');
+  el('breadcrumbs').classList.toggle('hidden', mode === 'tree');
+}
+
 async function renderFiles() {
-  renderBreadcrumbs();
+  setFilesLayoutVisibility(state.filesViewMode);
   const disabled = !state.config.sharedFolder.enabled;
   el('filesDisabledState').classList.toggle('hidden', !disabled);
-  el('fileTableBody').innerHTML = '';
   el('filesEmptyState').classList.add('hidden');
-  if (disabled) return;
+  if (disabled) {
+    el('fileTableBody').innerHTML = '';
+    el('fileThumbnailView').innerHTML = '';
+    el('fileTreeView').innerHTML = '';
+    return;
+  }
 
+  if (state.filesViewMode === 'tree') {
+    renderBreadcrumbs();
+    await renderFileTreeRoot();
+    return;
+  }
+
+  renderBreadcrumbs();
   try {
     const { items } = await api.listFiles(state.filesPath);
     el('filesEmptyState').classList.toggle('hidden', items.length > 0);
-    const body = el('fileTableBody');
+    if (state.filesViewMode === 'thumbnail') renderFilesThumbnailView(items);
+    else renderFilesListView(items);
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+function renderFilesListView(items) {
+  const body = el('fileTableBody');
+  body.innerHTML = '';
+  for (const item of items) {
+    const rowPath = state.filesPath ? `${state.filesPath}/${item.name}` : item.name;
+    const tr = document.createElement('tr');
+    if (item.type === 'dir') tr.className = 'dir-row';
+    tr.innerHTML = `
+      <td>${item.type === 'dir' ? '📁' : '📄'}</td>
+      <td class="file-name">${escapeHtml(item.name)}</td>
+      <td>${item.type === 'dir' ? '—' : formatSize(item.size)}</td>
+      <td>${item.modified ? new Date(item.modified).toLocaleString() : '—'}</td>
+      <td class="file-row-actions"></td>
+    `;
+    const actions = tr.querySelector('.file-row-actions');
+    if (item.type === 'file') {
+      const dl = document.createElement('a');
+      dl.href = api.downloadUrl(rowPath);
+      dl.textContent = '⬇';
+      dl.title = 'Download';
+      actions.appendChild(dl);
+    }
+    if (state.config.sharedFolder.allowDelete) {
+      const del = document.createElement('button');
+      del.textContent = '✕';
+      del.title = 'Delete';
+      del.onclick = async (ev) => {
+        ev.stopPropagation();
+        if (!confirm(`Delete ${item.name}?`)) return;
+        try {
+          await api.deleteFile(rowPath);
+          renderFiles();
+        } catch (err) {
+          toast(err.message, true);
+        }
+      };
+      actions.appendChild(del);
+    }
+    if (item.type === 'dir') {
+      tr.addEventListener('click', () => { state.filesPath = rowPath; renderFiles(); });
+    }
+    body.appendChild(tr);
+  }
+}
+
+const IMAGE_FILE_RE = /\.(png|jpe?g|gif|webp|avif|svg|bmp)$/i;
+
+function renderFilesThumbnailView(items) {
+  const wrap = el('fileThumbnailView');
+  wrap.innerHTML = '';
+  for (const item of items) {
+    const rowPath = state.filesPath ? `${state.filesPath}/${item.name}` : item.name;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'file-thumb';
+
+    const iconInner = item.type === 'dir'
+      ? '📁'
+      : IMAGE_FILE_RE.test(item.name)
+        ? `<img src="${escapeAttr(api.downloadUrl(rowPath))}" alt="" loading="lazy" />`
+        : '📄';
+
+    btn.innerHTML = `
+      <div class="file-thumb-icon">${iconInner}</div>
+      <div class="file-thumb-name">${escapeHtml(item.name)}</div>
+    `;
+
+    if (item.type === 'dir') {
+      btn.addEventListener('click', () => { state.filesPath = rowPath; renderFiles(); });
+    } else {
+      btn.addEventListener('click', () => window.open(api.downloadUrl(rowPath), '_blank', 'noopener'));
+    }
+    wrap.appendChild(btn);
+  }
+}
+
+// Lazily fetches each folder's children only when it's actually expanded,
+// reusing the same single-directory endpoint List/Thumbnail already use —
+// no new backend route, and no risk of trying to walk a huge shared folder
+// in one request. treeExpanded persists across re-renders (e.g. after an
+// upload) so expanding a folder doesn't collapse everything else.
+const treeExpanded = new Set(['']);
+
+async function renderFileTreeRoot() {
+  const wrap = el('fileTreeView');
+  wrap.innerHTML = '';
+  try {
+    wrap.appendChild(await buildTreeNode('', 'shared', true));
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+async function buildTreeNode(path, label, isDir) {
+  const row = document.createElement('div');
+  row.className = 'tree-row' + (isDir && state.filesPath === path ? ' active' : '');
+  row.innerHTML = `
+    <span class="tree-toggle">${isDir ? (treeExpanded.has(path) ? '▼' : '▶') : ''}</span>
+    <span>${isDir ? '📁' : '📄'}</span>
+    <span class="tree-name">${escapeHtml(label)}</span>
+  `;
+
+  const container = document.createElement('div');
+  container.appendChild(row);
+
+  if (!isDir) {
+    row.addEventListener('click', () => window.open(api.downloadUrl(path), '_blank', 'noopener'));
+    return container;
+  }
+
+  const childrenWrap = document.createElement('div');
+  childrenWrap.className = 'tree-children';
+  childrenWrap.classList.toggle('hidden', !treeExpanded.has(path));
+  container.appendChild(childrenWrap);
+
+  row.addEventListener('click', async () => {
+    state.filesPath = path;
+    el('fileTreeView').querySelectorAll('.tree-row.active').forEach((r) => r.classList.remove('active'));
+    row.classList.add('active');
+
+    if (treeExpanded.has(path)) {
+      treeExpanded.delete(path);
+      childrenWrap.classList.add('hidden');
+    } else {
+      treeExpanded.add(path);
+      childrenWrap.classList.remove('hidden');
+      if (!childrenWrap.dataset.loaded) {
+        await populateTreeChildren(path, childrenWrap);
+        childrenWrap.dataset.loaded = 'true';
+      }
+    }
+    row.querySelector('.tree-toggle').textContent = treeExpanded.has(path) ? '▼' : '▶';
+  });
+
+  if (treeExpanded.has(path)) {
+    await populateTreeChildren(path, childrenWrap);
+    childrenWrap.dataset.loaded = 'true';
+  }
+
+  return container;
+}
+
+async function populateTreeChildren(path, wrapEl) {
+  wrapEl.innerHTML = '';
+  try {
+    const { items } = await api.listFiles(path);
     for (const item of items) {
-      const rowPath = state.filesPath ? `${state.filesPath}/${item.name}` : item.name;
-      const tr = document.createElement('tr');
-      if (item.type === 'dir') tr.className = 'dir-row';
-      tr.innerHTML = `
-        <td>${item.type === 'dir' ? '📁' : '📄'}</td>
-        <td class="file-name">${escapeHtml(item.name)}</td>
-        <td>${item.type === 'dir' ? '—' : formatSize(item.size)}</td>
-        <td>${item.modified ? new Date(item.modified).toLocaleString() : '—'}</td>
-        <td class="file-row-actions"></td>
-      `;
-      const actions = tr.querySelector('.file-row-actions');
-      if (item.type === 'file') {
-        const dl = document.createElement('a');
-        dl.href = api.downloadUrl(rowPath);
-        dl.textContent = '⬇';
-        dl.title = 'Download';
-        actions.appendChild(dl);
-      }
-      if (state.config.sharedFolder.allowDelete) {
-        const del = document.createElement('button');
-        del.textContent = '✕';
-        del.title = 'Delete';
-        del.onclick = async (ev) => {
-          ev.stopPropagation();
-          if (!confirm(`Delete ${item.name}?`)) return;
-          try {
-            await api.deleteFile(rowPath);
-            renderFiles();
-          } catch (err) {
-            toast(err.message, true);
-          }
-        };
-        actions.appendChild(del);
-      }
-      if (item.type === 'dir') {
-        tr.addEventListener('click', () => { state.filesPath = rowPath; renderFiles(); });
-      }
-      body.appendChild(tr);
+      const childPath = path ? `${path}/${item.name}` : item.name;
+      wrapEl.appendChild(await buildTreeNode(childPath, item.name, item.type === 'dir'));
     }
   } catch (err) {
     toast(err.message, true);
   }
 }
+
+el('filesLayoutSwitch').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-layout]');
+  if (!btn) return;
+  state.filesViewMode = btn.dataset.layout;
+  localStorage.setItem('mc:filesView', state.filesViewMode);
+  el('filesLayoutSwitch').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
+  renderFiles();
+});
 
 el('mkdirBtn').addEventListener('click', async () => {
   const name = prompt('New folder name:');
@@ -1134,6 +1991,25 @@ enableDragReorder(el('chatChannelTabs'), {
   onSuccess: applyLocalChannelReorder,
 });
 
+// Drives both the outer layout chrome (chat-layout's own mode-* class —
+// tabs-above vs. sidebar-beside vs. borderless) and the message bubble
+// style, which piggybacks on Tabs vs. everything-else: Sidebar and
+// Floating both read as "AI chat interface", so both use the bubble
+// treatment; only Tabs keeps the original flat author/time layout.
+function applyChatLayoutMode(mode) {
+  state.chatViewMode = mode;
+  localStorage.setItem('mc:chatView', mode);
+  el('chatLayoutSwitch').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.layout === mode));
+  el('chatLayout').className = `chat-layout mode-${mode}`;
+  renderChatMessages();
+}
+
+el('chatLayoutSwitch').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-layout]');
+  if (!btn) return;
+  applyChatLayoutMode(btn.dataset.layout);
+});
+
 async function switchChannel(channelId) {
   state.activeChannelId = channelId;
   const channel = (state.config.chatChannels || []).find((c) => c.id === channelId);
@@ -1164,6 +2040,8 @@ function attachmentMarkup(attachment) {
 
 function renderChatMessages() {
   const list = el('chatMessages');
+  const messageStyle = state.chatViewMode === 'tabs' ? 'default' : 'bubbles';
+  list.className = `chat-messages mode-${messageStyle}`;
   const messages = state.chatMessages.get(state.activeChannelId) || [];
   el('chatEmptyState').classList.toggle('hidden', messages.length > 0);
   const wasNearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
@@ -1173,9 +2051,10 @@ function renderChatMessages() {
     const linkified = URL_ONLY_RE.test(trimmed)
       ? `<a href="${escapeAttr(trimmed)}" target="_blank" rel="noopener">${escapeHtml(trimmed)}</a>`
       : escapeHtml(m.text);
+    const mine = m.author === state.deviceName;
 
     return `
-      <div class="chat-message" data-id="${m.id}">
+      <div class="chat-message ${mine ? 'own' : 'other'}" data-id="${m.id}">
         <div class="chat-message-meta">
           <span class="chat-message-author">${escapeHtml(m.author)}</span>
           <span class="chat-message-time">${timeAgo(m.createdAt)}</span>
@@ -1349,8 +2228,14 @@ function render() {
 }
 
 renderDeviceNameLabel();
+el('dashboardLayoutSwitch').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.layout === state.dashboardViewMode));
+el('filesLayoutSwitch').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.layout === state.filesViewMode));
+el('chatLayout').className = `chat-layout mode-${state.chatViewMode}`;
+el('chatLayoutSwitch').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.layout === state.chatViewMode));
 loadAll().catch((err) => toast(err.message, true));
 setInterval(pollStatus, 5000);
+pollHostHealth();
+setInterval(pollHostHealth, 10000);
 connectWebSocket({
   status: handleWsStatus,
   config: handleWsConfig,

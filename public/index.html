@@ -28,7 +28,7 @@
   <header class="hero">
     <div class="hero-icons">
       <div class="hero-icon-badge" id="onlineBadge" title="Services online">·</div>
-      <button id="openHostHealth" class="hero-icon-btn" title="Host PC Health">🖥️ …</button>
+      <button id="openHostHealth" class="hero-icon-btn host-health-quick" title="Host PC Health">🖥️ …</button>
       <button id="openSettings" class="hero-icon-btn" title="Settings">⚙</button>
     </div>
     <div class="brand">🛰️ Mission Control</div>
@@ -82,6 +82,7 @@
   <main id="filesView" class="view">
     <div class="files-toolbar">
       <div class="breadcrumbs" id="breadcrumbs"></div>
+      <input type="search" id="fileSearchInput" class="file-search-input" placeholder="Search this share…" />
       <div class="layout-switch" id="filesLayoutSwitch">
         <button type="button" data-layout="list" class="active" title="List">☰</button>
         <button type="button" data-layout="thumbnail" title="Thumbnails">▦</button>
@@ -89,8 +90,9 @@
       </div>
       <div class="file-actions">
         <button id="uploadBtn" class="btn">⬆ Upload</button>
-        <input type="file" id="uploadInput" hidden />
+        <input type="file" id="uploadInput" hidden multiple />
         <button id="mkdirBtn" class="btn ghost">＋ New Folder</button>
+        <button id="openRecentBtn" class="btn ghost" title="Recently added files">🕓 Recent</button>
       </div>
     </div>
     <div class="file-drop" id="fileDrop">
@@ -102,7 +104,9 @@
       </table>
       <div class="file-thumbnails hidden" id="fileThumbnailView"></div>
       <div class="file-tree hidden" id="fileTreeView"></div>
+      <div class="file-search-results hidden" id="fileSearchResults"></div>
       <p class="empty-state hidden" id="filesEmptyState">This folder is empty.</p>
+      <p class="empty-state hidden" id="filesSearchEmptyState">No files match "<span id="fileSearchEmptyQuery"></span>".</p>
       <p class="empty-state hidden" id="filesDisabledState">
         File sharing is disabled. Enable it and set a folder path in Settings.
       </p>
@@ -164,14 +168,48 @@
           <input type="checkbox" name="healthCheck" checked />
           Monitor health (HTTP ping)
         </label>
-        <label>Health check path<input name="healthCheckPath" placeholder="/" /></label>
+        <label class="checkbox-row">
+          <input type="checkbox" name="tailscaleHealthCheck" id="tailscaleHealthCheckInput" />
+          Use the Tailscale CLI instead of an HTTP ping
+          <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">For the Tailscale service itself — checks this host's real connection state (<code>tailscale status</code>) instead of pinging a URL. Leave off for everything else.</span></button>
+        </label>
+        <label id="healthCheckPathField">Health check path<input name="healthCheckPath" placeholder="/" /></label>
         <label>MAC address (optional — enables a Wake button for this device)
           <input name="mac" placeholder="AA:BB:CC:DD:EE:FF" pattern="^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$" />
         </label>
-        <fieldset>
-          <legend>Connections</legend>
+        <div class="settings-section">
+          <h3>Connections
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble"><strong>Related</strong> just draws a dashed line on the Connections/Graph view — organizational only. <strong>Depends on</strong> is directional: if that service goes offline, this one shows as degraded instead of online. Only the dependent side can set or change it.</span></button>
+          </h3>
           <div id="connectionsChecklist" class="checklist"></div>
-        </fieldset>
+        </div>
+        <div class="settings-section">
+          <h3>Service Control (advanced, optional)
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Only for services actually running on this host — leave as None for websites. Also requires Service Control turned on in Settings → Security.</span></button>
+          </h3>
+          <label>Control type
+            <select name="controllerType" id="controllerTypeSelect">
+              <option value="">None</option>
+              <option value="script">Shell commands</option>
+              <option value="docker">Docker container</option>
+            </select>
+          </label>
+          <div id="controllerScriptFields" class="hidden">
+            <label>Start command<input name="controllerStartCmd" placeholder="e.g. net start Spooler" /></label>
+            <label>Stop command<input name="controllerStopCmd" placeholder="e.g. net stop Spooler" /></label>
+            <label>Restart command<input name="controllerRestartCmd" placeholder="optional — combine stop+start yourself if needed" /></label>
+          </div>
+          <div id="controllerDockerFields" class="hidden">
+            <label>Container name or ID
+              <div class="inline-form">
+                <input name="controllerContainer" placeholder="jellyfin" style="flex:1;" />
+                <button type="button" id="pickContainerBtn" class="btn ghost">Browse…</button>
+              </div>
+            </label>
+            <div id="containerPickerList" class="checklist hidden" style="max-height:120px;"></div>
+            <p id="containerPickerError" class="login-error hidden"></p>
+          </div>
+        </div>
         <div class="modal-actions">
           <button type="button" id="deleteServiceBtn" class="btn danger hidden">Delete</button>
           <div class="spacer"></div>
@@ -227,19 +265,18 @@
 
       <div class="settings-tab-panel" data-tab-panel="notifications">
         <div class="settings-section">
-          <h3>Notifications</h3>
+          <h3>Notifications
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Always shown as an in-page toast. Desktop notifications additionally require browser permission and only work when this app is opened at <code>localhost</code> — browsers block them on a plain-HTTP LAN address.</span></button>
+          </h3>
           <label class="checkbox-row">
             <input type="checkbox" id="notifyToggle" />
             Notify me when a service goes offline or comes back online
           </label>
-          <p class="settings-hint">
-            Always shown as an in-page toast. Desktop notifications additionally
-            require browser permission and only work when this app is opened at
-            <code>localhost</code> — browsers block them on a plain-HTTP LAN address.
-          </p>
         </div>
         <div class="settings-section">
-          <h3>External Alerts</h3>
+          <h3>External Alerts
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Fires even when nobody has this dashboard open, unlike the in-page toast and desktop notification above. Save first, then send a test to confirm the URL actually works.</span></button>
+          </h3>
           <label class="checkbox-row">
             <input type="checkbox" id="alertsEnabled" />
             Send a webhook when a service goes offline or comes back online
@@ -254,11 +291,6 @@
               <option value="slack">Slack</option>
             </select>
           </label>
-          <p class="settings-hint">
-            Fires even when nobody has this dashboard open, unlike the in-page
-            toast and desktop notification above. Save first, then send a test
-            to confirm the URL actually works.
-          </p>
           <button type="button" id="sendTestAlertBtn" class="btn ghost">Send test alert</button>
         </div>
       </div>
@@ -286,7 +318,9 @@
 
       <div class="settings-tab-panel" data-tab-panel="security">
         <div class="settings-section">
-          <h3>Password Protection</h3>
+          <h3>Password Protection
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">One shared password for the whole app, not per-person accounts. Sessions renew automatically while active and expire after this many days of inactivity.</span></button>
+          </h3>
           <p id="authStatusText" class="settings-hint"></p>
           <form id="setPasswordForm" class="inline-form" style="flex-wrap:wrap;">
             <input name="password" type="password" placeholder="New password (min. 8 characters)" autocomplete="new-password" style="flex:1;min-width:180px;" />
@@ -304,14 +338,11 @@
               <button type="button" id="saveSessionDaysBtn" class="btn ghost">Save</button>
             </div>
           </label>
-          <p class="settings-hint">
-            One shared password for the whole app, not per-person accounts.
-            Sessions renew automatically while active and expire after this
-            many days of inactivity.
-          </p>
         </div>
         <div class="settings-section">
-          <h3>IP Allowlist</h3>
+          <h3>IP Allowlist
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Requests from outside these ranges are rejected before login is even offered. 127.0.0.1 is always allowed. Your own current IP is checked before this saves, so you can't lock yourself out.</span></button>
+          </h3>
           <label class="checkbox-row">
             <input type="checkbox" id="ipAllowlistEnabled" />
             Only allow these IP ranges to reach this app
@@ -321,21 +352,29 @@
           </label>
           <button type="button" id="saveIpAllowlistBtn" class="btn ghost" style="margin-top:8px;">Save</button>
           <p id="ipAllowlistError" class="login-error hidden"></p>
-          <p class="settings-hint">
-            Requests from outside these ranges are rejected before login is
-            even offered. 127.0.0.1 is always allowed. Your own current IP is
-            checked before this saves, so you can't lock yourself out.
+        </div>
+        <div class="settings-section">
+          <h3>Service Control
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Runs whatever start/stop/restart command you've saved on a service's own Edit screen, directly on this host. Off by default, and can't be enabled at all until password protection is — this is the one feature that runs arbitrary commands, so it gets an extra lock. Only fill in commands for services actually running on this host; leave them blank for websites.</span></button>
+          </h3>
+          <label class="checkbox-row">
+            <input type="checkbox" id="serviceControlEnabled" />
+            Allow start/stop/restart commands to run from the dashboard
+          </label>
+          <p id="serviceControlAuthWarning" class="login-error hidden">
+            Set a password above first — service control can't be turned on
+            without password protection enabled.
           </p>
+          <button type="button" id="saveServiceControlBtn" class="btn ghost" style="margin-top:8px;">Save</button>
+          <p id="serviceControlError" class="login-error hidden"></p>
         </div>
       </div>
 
       <div class="settings-tab-panel" data-tab-panel="devices">
         <div class="settings-section">
-          <h3>Connected Devices</h3>
-          <p class="settings-hint" style="margin-bottom:10px;">
-            Every device that has hit this server — by IP, browser/OS, and
-            request count. The dot shows whether it's connected right now.
-          </p>
+          <h3>Connected Devices
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Every device that has hit this server — by IP, browser/OS, and request count. The dot shows whether it's connected right now.</span></button>
+          </h3>
           <div id="devicesList" class="devices-list"></div>
           <button type="button" id="clearDevicesBtn" class="btn ghost" style="margin-top:10px;">Clear History</button>
         </div>
@@ -343,13 +382,9 @@
 
       <div class="settings-tab-panel" data-tab-panel="backup">
         <div class="settings-section">
-          <h3>Backup &amp; Restore</h3>
-          <p class="settings-hint">
-            Everything above — services, groups, connections, chat channels,
-            and settings — as one JSON file. Not included: chat history,
-            shared-folder files, device history, and host stats, since those
-            were never part of the saved config to begin with.
-          </p>
+          <h3>Backup &amp; Restore
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Everything above — services, groups, connections, chat channels, and settings — as one JSON file. Not included: chat history, shared-folder files, device history, and host stats, since those were never part of the saved config to begin with. Your password is never included either. ⚠️ Anything you've saved in a service's Service Control fields (shell commands, Docker container names) is exported in plain text — treat the file accordingly if you share or store it anywhere.</span></button>
+          </h3>
           <div class="inline-form">
             <a id="exportConfigBtn" class="btn ghost" href="/api/config/export">⬇ Export config</a>
             <button type="button" id="importConfigBtn" class="btn ghost">⬆ Import config…</button>
@@ -374,6 +409,58 @@
       <div class="modal-actions">
         <div class="spacer"></div>
         <button type="button" id="closeHostHealthBtn" class="btn ghost">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Image/video/audio preview -->
+  <div id="previewModal" class="modal hidden">
+    <div class="modal-card preview-card">
+      <div class="preview-header">
+        <span id="previewName"></span>
+        <div class="preview-header-actions">
+          <a id="previewDownloadBtn" class="icon-btn" title="Download">⬇</a>
+          <button type="button" id="closePreviewBtn" class="icon-btn" title="Close">✕</button>
+        </div>
+      </div>
+      <div class="preview-body" id="previewBody"></div>
+      <div class="preview-nav">
+        <button type="button" id="previewPrevBtn" class="btn ghost">‹ Prev</button>
+        <span id="previewPosition" class="preview-position"></span>
+        <button type="button" id="previewNextBtn" class="btn ghost">Next ›</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Docker container logs modal -->
+  <div id="logsModal" class="modal hidden">
+    <div class="modal-card logs-card">
+      <div class="preview-header">
+        <span id="logsModalTitle"></span>
+        <div class="preview-header-actions">
+          <button type="button" id="refreshLogsBtn" class="icon-btn" title="Refresh now">⟳</button>
+          <button type="button" id="closeLogsBtn" class="icon-btn" title="Close">✕</button>
+        </div>
+      </div>
+      <pre id="logsOutput" class="logs-output"></pre>
+      <p id="logsError" class="login-error hidden"></p>
+      <p class="settings-hint">Refreshes automatically every few seconds while open — this is the container's own recent log buffer, not a live stream.</p>
+    </div>
+  </div>
+
+  <!-- Recently added files modal -->
+  <div id="recentModal" class="modal hidden">
+    <div class="modal-card">
+      <h2>Recently added</h2>
+      <p class="settings-hint" style="margin-top:-6px;">
+        The last files uploaded to the shared folder, newest first. Not
+        included: anything moved or renamed after upload, or files added
+        directly on disk rather than through this app.
+      </p>
+      <div id="recentList" class="recent-list"></div>
+      <div class="modal-actions">
+        <div class="spacer"></div>
+        <button type="button" id="closeRecentBtn" class="btn ghost">Close</button>
       </div>
     </div>
   </div>

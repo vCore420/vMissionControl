@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "An installable LAN homepage for locally-hosted services and everyday websites — live status and uptime history, groups, pinned favorites, connections between services, a shared file browser, and a quick-launch omnibox.",
+  "description": "An installable LAN homepage for locally-hosted services and everyday websites — live status and uptime history, dependency-aware connections between services, start/stop/restart and log access for Docker/host services, a shared file browser, chat, and a quick-launch omnibox.",
   "license": "MIT",
   "engines": {
     "node": ">=18.17.0"

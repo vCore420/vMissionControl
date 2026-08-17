@@ -124,16 +124,43 @@ its own.
   a command-palette overlay; type to filter, arrow keys + Enter to jump
   straight to a service in a new tab. Meant to make this a real replacement
   for a browser new-tab page once your everyday sites are in here too.
-- **Connections** — link related services (e.g. Open WebUI → Ollama). Hover
-  a card to highlight its connections; click **Connections** in the top bar
-  to draw lines between every connected pair.
+- **Connections** — link related services, either as a plain undirected
+  **Related** link or a directed **Depends on this** link (e.g. Open WebUI
+  depends on Ollama). A service whose dependency is confirmed offline shows
+  as **degraded**, not just online — a third status distinct from both
+  online and offline, cascading through transitive dependencies too. The
+  dependency side of a depends-on link is the only place that link can be
+  edited or re-typed; the depended-on service just sees a read-only "depends
+  on this" row it can remove but not re-type, so a relationship always has
+  one owner. Hover a card to highlight its connections; click
+  **Connections** in the top bar to draw lines between every connected pair
+  (Graph view always draws them) — depends-on links get a solid line with
+  an arrowhead pointing from the dependent service to the one it relies on,
+  related links stay dashed and undirected.
 - **Health checks + uptime history** — the backend pings each monitored
   entry's URL on an interval (default 15s, configurable in Settings),
   caches the result, and keeps a rolling history (6h / 2000 samples, in
   memory only) that renders as the sparkline strip and uptime % on each
   card. The frontend polls the cheap `/api/status` endpoint every 5s as a
   fallback, but normally hears about a change immediately over the
-  real-time connection below.
+  real-time connection below. One exception: a service with **"Use the
+  Tailscale CLI instead of an HTTP ping"** checked skips the URL fetch
+  entirely and instead runs `tailscale status --json` on the host and
+  reads `BackendState`/`Self.Online` — a real check of whether this
+  machine's Tailscale connection is actually up, since Tailscale doesn't
+  run an HTTP service worth pinging the normal way. Deliberately
+  independent of that service's `url` field, which stays exactly what it
+  already was (the Enter-button link to Tailscale's local dashboard, or
+  wherever you've pointed it) — the check and the link were tangled
+  together before this, now they aren't. When connected, the tailnet name
+  is shown in place of the usual latency figure; when Tailscale reports
+  its own health warnings while still connected, those show there too.
+  Investigated deliberately: start/stop/restart for Tailscale itself was
+  considered and intentionally left out — the Windows service requires
+  admin rights this app doesn't run with, and even the CLI's own `down`
+  command guards against exactly the risk that matters here (cutting the
+  connection you might be using to reach this dashboard in the first
+  place). Monitoring only.
 - **Real-time sync across every connected device** — a WebSocket pushes
   status changes, edits, pins, reorders, and chat messages to every open
   dashboard the instant they happen, so pinning a service on your phone
@@ -167,7 +194,27 @@ its own.
   at all.
 - **File share** — point Settings → Shared folder at any directory on this
   host and browse/upload/download it from any device that can reach this
-  app. Uploads and deletes are each toggleable independently.
+  app. Uploads and deletes are each toggleable independently. Drag-and-drop
+  upload works anywhere in the Files view (List/Thumbnail/Tree alike,
+  multi-file at once) since the drop zone wraps all three, not just one
+  layout. **Rename** and **move** are the same server operation under the
+  hood (just a relocate within vs. across folders) — rename via the ✎
+  button in List view, move by dragging a row onto a folder row. A
+  **Recent** button shows the last uploads this server has seen (name,
+  folder, size, when), sourced from an in-memory list captured at upload
+  time rather than a live filesystem walk — cheap, but it only knows about
+  files uploaded through the app, not ones already sitting in the shared
+  folder or added directly on disk, and resets on restart like the app's
+  other ephemeral caches. Uploads stream straight to disk instead of
+  buffering in memory first, so a large video/audio file doesn't sit in
+  RAM mid-upload. **Search** looks across the whole shared tree, not just
+  the open folder — a recursive walk capped at 200 results/20,000 entries
+  scanned so a huge share can't hang a request, shown as a flat list of
+  matches with each one's folder. **Preview** — clicking an image, video,
+  or audio file opens it inline (native `<img>`/`<video>`/`<audio>`,
+  Range-request seeking included) instead of downloading it, with
+  Prev/Next cycling through whatever previewable files were in the same
+  listing — a folder's contents or a set of search results either way.
 - **Themes** — Dark, Light, Cyberpunk, Pride, Cute, Cozy, Her, Forest,
   Ocean, Matrix, Nord, Sunset, Vaporwave, and Mono, picked from a swatch
   grid in Settings → Appearance. Every color in the app is a
@@ -195,10 +242,18 @@ its own.
     collapsible folder tree, lazily fetching each folder's contents only
     when you expand it (no new backend endpoint, no walking the whole
     shared folder up front).
-  - **Chat**: Default (current, author+time above the message) ·
-    **Bubbles** — iMessage-style, your own messages align right in accent
-    color, everyone else's align left · **Compact** — one dense IRC-style
-    line per message (`[time] author: text`).
+  - **Chat**: unlike the other two, this switches the whole interface
+    layout, not just how messages render. **Tabs** (default) — channels
+    as a row of tabs above the conversation, today's original layout.
+    **Sidebar** — channels as a vertical list beside the conversation,
+    AI-chat-app style; both this and Floating render messages as bubbles
+    (your own align right in accent color, everyone else's align left).
+    **Floating** — the same sidebar channel list, but the conversation
+    itself has no card background or border at all — bubbles sit directly
+    on the page background, and the composer is just the input pill and
+    buttons with no surrounding bar. Sidebar/Floating collapse back to a
+    horizontal scrollable strip above the conversation on phone-width
+    screens, the same graceful-degrade real chat apps use.
 
   Every one of these is saved to that browser's own `localStorage` — it's
   a per-device display preference, not part of `config.json`, so switching
@@ -245,6 +300,40 @@ its own.
   cache as a side effect, so after a scan, `arp -a` usually already has the
   MAC for anything discovery found — no manual typing needed for most
   devices added that way.
+- **Service Control** — an opt-in "advanced" section on any service's Edit
+  screen lets you save a start/stop/restart shell command (e.g. `docker
+  restart jellyfin`), each one independent — a service can have just a
+  restart hook and no separate start/stop if that's all it needs. Websites
+  are excluded by convention, not by code: the fields are just never filled
+  in for them. Runs on the host, so it's off by default behind two
+  independent switches: Settings → Security → Service Control (an explicit
+  opt-in separate from just having a password set) *and* password
+  protection itself — the toggle can't even be turned on until a password
+  is set, since this is the one feature that runs commands on the host.
+  Every attempt is written to the activity log (who, what, success/fail),
+  each command gets a 20s timeout and its output is capped and shown back
+  in a toast, and a short cooldown per service+action guards against an
+  accidental double-click re-running something. Stop/restart ask for
+  confirmation first; start doesn't, since there's nothing to lose. A
+  successful call schedules a recheck a few seconds later so the status
+  dot catches up once the process has actually changed state.
+
+  A second controller type, **Docker container**, talks to the Docker
+  Engine API directly (over its local named pipe on Windows, no client
+  library — just enough HTTP request-building for start/stop/restart, a
+  container-list, and a log fetch) instead of running a shell command, so
+  there's only one field to fill in: a container name or ID, with a
+  "Browse…" button that lists your actually-running containers to pick
+  from instead of typing one by hand. Docker-backed services also get a
+  📜 Logs button — a snapshot of the container's recent stdout/stderr,
+  refreshed automatically every few seconds while the modal is open. This
+  is deliberately *not* a live stream (`docker logs -f`): it's a
+  read-only poll of `docker logs`'s own tail, simpler and without holding
+  a long-lived connection open per viewer. Unlike start/stop/restart,
+  viewing logs only needs a normal signed-in session — it doesn't run
+  anything, so it isn't gated behind the Service Control switch, though
+  the button itself only appears once that switch is on (same as every
+  other control button) to keep the feature discoverable as one thing.
 - **External alerts** — Settings → External Alerts fires an outbound
   webhook on every online↔offline transition, in addition to (not instead
   of) the in-page toast and desktop notification — the difference is this
@@ -400,6 +489,16 @@ not a substitute for real internet-facing hardening — and keep
 `allowDelete` off unless you want any authenticated device to be able to
 remove shared-folder files.
 
+**Service Control is the opposite — it *requires* the password gate.**
+Every other feature in this app works the same whether or not auth is on;
+Service Control is the one exception, refusing to even be turned on in
+Settings until a password is set, because it's the one feature that runs
+commands on the host rather than just reading/writing config. Commands
+themselves are ones you write yourself (in each service's Edit screen),
+not something a request can supply — so the risk it's guarding against
+isn't injection, it's an unauthorized party on the network triggering a
+command you already wrote.
+
 **The IP allowlist and the activity log are both independent of the
 password gate above** — the allowlist is a network-layer restriction
 (reduces who can even reach the app), the log is a record of what
@@ -441,6 +540,14 @@ server/
                                read/started/cancelled on request, no events
   wol.js                       Builds + sends a Wake-on-LAN magic packet
                                 over UDP broadcast, no events
+  serviceControl.js             Runs a service's saved start/stop/restart
+                                 shell command (child_process.exec, timeout +
+                                 truncated output), no events
+  docker.js                      Minimal Docker Engine API client (named
+                                  pipe on Windows, no client library) —
+                                  container start/stop/restart, list, logs
+  tailscale.js                    Runs `tailscale status --json`, read-only —
+                                  backs the tailscaleHealthCheck service flag
   alerts.js                     Server-side online/offline transition
                                  tracker + outbound webhook sender (Discord/
                                  Slack/generic), independent of the
@@ -471,10 +578,21 @@ server/
     chat-uploads/             Gitignored — chat attachment files
   routes/
     services.js, groups.js, connections.js   CRUD over config.json,
-                            plus services' /:id/check and /:id/wake
+                            plus services' /:id/check, /:id/wake,
+                            /:id/start /:id/stop /:id/restart (gated on
+                            security.serviceControl.enabled + auth.enabled,
+                            dispatches to serviceControl.js or docker.js by
+                            controller.type), and /:id/logs (Docker only,
+                            read-only, just needs a session)
+    docker.js               GET /containers — backs the container picker
+                            in the Add/Edit Service modal
     settings.js            Health-check + shared-folder + alerts + IP
-                            allowlist settings, plus /test-alert
-    files.js               Shared-folder browser (list/download/upload/mkdir/delete)
+                            allowlist + service-control settings, plus
+                            /test-alert
+    files.js               Shared-folder browser: list/download/upload
+                            (disk-streamed)/mkdir/delete/move (rename is
+                            move-in-place)/recent (in-memory upload list)/
+                            search (recursive, capped)
     chat.js                 Channel CRUD (via config.js), message
                             list/post(multipart)/delete, attachment serving
     devices.js               GET the tracked list, DELETE to clear history
@@ -497,7 +615,26 @@ public/
                             on a 401
     ws.js                   WebSocket client: connects, reconnects with
                             backoff, dispatches typed messages
-    app.js                  All UI state, rendering, and event wiring
+    core.js                 Shared state, DOM/formatting helpers, the
+                            WebSocket/poll sync engine, and drag-reorder —
+                            imported by every module below; never imports
+                            from one itself (see its own top comment for
+                            why, and how `callbacks` avoids circular imports)
+    dashboard.js             Cards/List/Graph views, the Add/Edit Service
+                              modal (incl. the connections pill-toggle
+                              checklist), start/stop/restart/logs controls,
+                              network discovery
+    files.js                 Shared-folder browser: List/Thumbnail/Tree,
+                              rename/move, whole-share search, upload,
+                              media preview, Recently Added
+    chat.js                  Channels, messages, attachments, layout modes
+    settings.js              The Settings modal (theme, groups, devices,
+                              security, backup) + the standalone Host
+                              Health modal
+    omnibox.js                The "/" quick-launch command palette
+    app.js                  Entry point: boots the modules above, wires
+                            core.js's sync-engine callbacks to their real
+                            render functions, owns the top nav view switch
     connections.js           SVG line-drawing + hover-highlight for the connections view
 scripts/
   install-autostart.bat, uninstall-autostart.bat   Register/remove the

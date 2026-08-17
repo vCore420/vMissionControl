@@ -7,11 +7,17 @@
 // Bump CACHE_NAME whenever SHELL_URLS changes so old caches get cleaned up.
 // (The WebSocket connection itself is a separate protocol upgrade, not a
 // fetch event, so it never passes through this service worker at all.)
-const CACHE_NAME = 'mission-control-shell-v2';
+const CACHE_NAME = 'mission-control-shell-v3';
 const SHELL_URLS = [
   '/',
   '/css/style.css',
   '/js/app.js',
+  '/js/core.js',
+  '/js/dashboard.js',
+  '/js/files.js',
+  '/js/chat.js',
+  '/js/settings.js',
+  '/js/omnibox.js',
   '/js/api.js',
   '/js/connections.js',
   '/js/ws.js',

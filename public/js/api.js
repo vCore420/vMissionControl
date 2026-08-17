@@ -48,6 +48,11 @@ export const api = {
   deleteService: (id) => request('DELETE', `/api/services/${encodeURIComponent(id)}`),
   checkServiceNow: (id) => request('POST', `/api/services/${encodeURIComponent(id)}/check`),
   wakeService: (id) => request('POST', `/api/services/${encodeURIComponent(id)}/wake`),
+  startService: (id) => request('POST', `/api/services/${encodeURIComponent(id)}/start`),
+  stopService: (id) => request('POST', `/api/services/${encodeURIComponent(id)}/stop`),
+  restartService: (id) => request('POST', `/api/services/${encodeURIComponent(id)}/restart`),
+  getServiceLogs: (id, tail = 200) => request('GET', `/api/services/${encodeURIComponent(id)}/logs?tail=${tail}`),
+  getDockerContainers: () => request('GET', '/api/docker/containers'),
   reorderServices: (ids) => request('PUT', '/api/services/reorder', { ids }),
 
   createGroup: (body) => request('POST', '/api/groups', body),
@@ -102,6 +107,9 @@ export const api = {
   downloadUrl: (relPath) => `/api/files/download?path=${encodeURIComponent(relPath)}`,
   mkdir: (relPath) => request('POST', '/api/files/mkdir', { path: relPath }),
   deleteFile: (relPath) => request('DELETE', `/api/files?path=${encodeURIComponent(relPath)}`),
+  moveFile: (from, to) => request('POST', '/api/files/move', { from, to }),
+  getRecentUploads: () => request('GET', '/api/files/recent'),
+  searchFiles: (q) => request('GET', `/api/files/search?q=${encodeURIComponent(q)}`),
   uploadFile: async (dirPath, file) => {
     const form = new FormData();
     form.append('file', file);

@@ -798,6 +798,7 @@ button, input, select {
 .status-dot.offline { background: var(--offline); box-shadow: 0 0 8px var(--offline); }
 .status-dot.unmonitored { background: var(--unmonitored); }
 .status-dot.checking { background: var(--checking); }
+.status-dot.degraded { background: var(--checking); box-shadow: 0 0 8px var(--checking); }
 
 .card-meta {
   display: flex;
@@ -1074,6 +1075,7 @@ button, input, select {
 
 .graph-node.online .graph-node-icon { border-color: var(--online); }
 .graph-node.offline .graph-node-icon { border-color: var(--offline); }
+.graph-node.degraded .graph-node-icon { border-color: var(--checking); }
 .graph-node.pinned .graph-node-icon { box-shadow: 0 0 0 3px var(--accent-dim); }
 
 .graph-node-label {
@@ -1154,6 +1156,23 @@ button, input, select {
 
 .file-actions { display: flex; gap: 8px; }
 
+.file-search-input {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: var(--text);
+  width: 200px;
+  min-width: 0;
+}
+
+.file-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+}
+
 .file-drop {
   background: var(--bg-card);
   border: 2px solid var(--border);
@@ -1193,6 +1212,13 @@ button, input, select {
 
 .file-table tr.dir-row { cursor: pointer; }
 .file-table tr.dir-row:hover { background: var(--bg-card-hover); }
+.file-table tr.previewable { cursor: pointer; }
+.file-table tr.previewable:hover { background: var(--bg-card-hover); }
+
+/* Drag-to-move: a file/folder row being dragged, and the folder row
+   currently under the cursor as a valid drop target. */
+.file-table tr.file-dragging { opacity: 0.4; }
+.file-table tr.dir-row.drag-target { background: var(--accent-dim); outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .file-name { display: flex; align-items: center; gap: 8px; }
 
@@ -1251,6 +1277,126 @@ button, input, select {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.preview-card {
+  max-width: 860px;
+  padding: 16px;
+}
+
+.preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.preview-header span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.preview-header-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+.preview-header-actions .icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 1rem;
+  text-decoration: none;
+}
+
+.preview-header-actions .icon-btn:hover { color: var(--accent); }
+
+.preview-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  max-height: 70vh;
+  overflow: auto;
+  background: var(--bg-panel);
+  border-radius: 10px;
+}
+
+.preview-body img,
+.preview-body video {
+  max-width: 100%;
+  max-height: 70vh;
+  display: block;
+}
+
+.preview-body audio { width: 100%; margin: 40px 20px; }
+
+.logs-card { max-width: 760px; }
+
+.logs-output {
+  background: var(--bg-panel);
+  border-radius: 10px;
+  padding: 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+  font-family: monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 12px 0 0;
+}
+
+.preview-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.preview-position { font-size: 0.78rem; color: var(--text-faint); }
+
+.recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.recent-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+}
+
+.recent-item:hover { border-color: var(--accent); background: var(--bg-card-hover); }
+
+.recent-item-icon { font-size: 1.2rem; flex-shrink: 0; }
+
+.recent-item-info { flex: 1; min-width: 0; }
+
+.recent-item-name {
+  font-weight: 700;
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-item-meta {
+  font-size: 0.74rem;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-thumb-name {
@@ -1755,7 +1901,78 @@ button, input, select {
 }
 
 .modal-card h2 { margin-top: 0; font-size: 1.2rem; }
-.modal-card h3 { font-size: 0.9rem; color: var(--text-dim); margin-bottom: 8px; }
+.modal-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+/* A small "ⓘ" button that reveals a bubble of explanatory text on hover,
+   keyboard focus, or tap — replaces the always-on-screen hint paragraphs
+   that used to sit under every section. Nested inside a checkbox <label>
+   without triggering the checkbox: browsers don't forward a label's click
+   to its control when the click lands on another interactive element. */
+.info-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  font-family: inherit;
+  font-size: 0.66rem;
+  line-height: 1;
+  padding: 0;
+  cursor: help;
+  position: relative;
+}
+
+.info-tip:hover,
+.info-tip:focus-visible,
+.info-tip.tip-open {
+  color: var(--text);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.info-tip-bubble {
+  position: absolute;
+  top: 130%;
+  left: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: 230px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.74rem;
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--text-dim);
+  box-shadow: var(--shadow);
+  text-align: left;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  pointer-events: none;
+}
+
+.info-tip:hover .info-tip-bubble,
+.info-tip:focus-visible .info-tip-bubble,
+.info-tip.tip-open .info-tip-bubble {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
 
 .modal-card form label {
   display: block;
@@ -1796,7 +2013,7 @@ legend {
 }
 
 .checklist {
-  max-height: 140px;
+  max-height: 190px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1812,6 +2029,92 @@ legend {
 }
 
 .checklist label input { width: auto !important; }
+
+.connection-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px 6px 10px;
+}
+
+.connection-row-reverse {
+  background: transparent;
+  border-style: dashed;
+}
+
+.connection-row-label {
+  font-size: 0.82rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+/* A 3-way pill toggle (None / Related / Depends on) replaces what used to
+   be a checkbox plus a separately-enabled <select> — one control instead
+   of two for what's really one choice, and it can't collide with the
+   generic ".modal-card form select { width: 100% }" rule the old <select>
+   silently lost to (that's the layout bug this replaces, not just a
+   restyle). */
+.connection-type-toggle {
+  display: flex;
+  flex-shrink: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.ctt-btn {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-family: inherit;
+  font-size: 0.7rem;
+  padding: 3px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ctt-btn:hover { color: var(--text); }
+
+.ctt-btn.active {
+  background: var(--accent-dim);
+  color: var(--text);
+}
+
+.connection-reverse-hint {
+  color: var(--text-faint);
+  font-size: 0.74rem;
+  font-style: italic;
+  flex-shrink: 0;
+}
+
+.connection-remove-btn {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+
+.connection-remove-btn:hover { color: var(--offline); }
+
+.connections-empty {
+  color: var(--text-faint);
+  font-size: 0.8rem;
+  margin: 0;
+}
 
 .modal-actions {
   display: flex;
@@ -2260,6 +2563,22 @@ legend {
     width: auto;
     flex-shrink: 0;
   }
+
+  /* Dashboard list rows: icon + star + a fixed-width name + uptime % +
+     2-3 action buttons (each 44px here, the mobile touch-target size)
+     never all fit on one line on a phone, and none of them were allowed
+     to shrink — so the row just overflowed its own edge, taking the
+     action buttons with it. Dropping the status/group/description text
+     to its own second line (ordered last, so nothing after it gets
+     pushed down too) frees the whole first line for icon/name/actions,
+     letting the name itself flex down instead of holding its ground,
+     and giving the row's own action buttons a denser size that fits a
+     list row rather than the general touch-target default. */
+  .service-row { flex-wrap: wrap; row-gap: 4px; }
+  .service-row .row-name { flex: 1; min-width: 0; max-width: none; }
+  .service-row .row-meta { order: 10; flex-basis: 100%; }
+  .service-row .row-uptime { display: none; }
+  .service-row .row-actions .icon-btn { width: 32px; }
 
   /* Cramming the group filter chips into whatever's left of the row next
      to the card/list/graph switch left almost no width for them, so most

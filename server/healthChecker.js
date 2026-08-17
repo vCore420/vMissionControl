@@ -10,6 +10,7 @@
 import { appEvents } from './events.js';
 import { checkTransitions, forgetService as forgetAlertService } from './alerts.js';
 import { logActivity } from './activityLog.js';
+import { checkTailscaleStatus } from './tailscale.js';
 
 const statusCache = new Map();
 const historyCache = new Map(); // serviceId -> Array<{status: 'online'|'offline', t: number}>
@@ -52,6 +53,45 @@ function recordHistory(serviceId, status) {
   }
 }
 
+// A service whose own health check passes but that depends (directly or
+// transitively) on something that's confirmed offline is "degraded" —
+// distinct from "offline" (its own check still passes) and from "online"
+// (nothing it relies on is down). Only 'depends-on' connections feed
+// this; 'related' connections are just organizational and never affect
+// status. Only a dependency's raw 'offline' status counts as "down" —
+// 'unmonitored'/'checking' dependencies don't cascade, since their real
+// state isn't actually known. Runs after every sweep/recheck against
+// whatever's currently in statusCache, so it always reflects the latest
+// data for every service, not just the one(s) just checked.
+function applyCascadingStatus(connections) {
+  const dependsOnEdges = connections.filter((c) => c.type === 'depends-on');
+  const dependencyIdsOf = new Map(); // serviceId -> [ids it depends on]
+  for (const edge of dependsOnEdges) {
+    if (!dependencyIdsOf.has(edge.from)) dependencyIdsOf.set(edge.from, []);
+    dependencyIdsOf.get(edge.from).push(edge.to);
+  }
+
+  for (const [id, entry] of statusCache) {
+    if (entry.status !== 'online') {
+      entry.effectiveStatus = entry.status;
+      entry.degradedBy = [];
+      continue;
+    }
+    const downDependencies = [];
+    const visited = new Set([id]);
+    const stack = [...(dependencyIdsOf.get(id) || [])];
+    while (stack.length) {
+      const depId = stack.pop();
+      if (visited.has(depId)) continue;
+      visited.add(depId);
+      if (statusCache.get(depId)?.status === 'offline') downDependencies.push(depId);
+      stack.push(...(dependencyIdsOf.get(depId) || []));
+    }
+    entry.effectiveStatus = downDependencies.length ? 'degraded' : 'online';
+    entry.degradedBy = downDependencies;
+  }
+}
+
 function markUnmonitored(service) {
   statusCache.set(service.id, {
     id: service.id,
@@ -65,6 +105,26 @@ function markUnmonitored(service) {
 async function checkOne(service, timeoutMs) {
   if (!service.healthCheck) {
     markUnmonitored(service);
+    return;
+  }
+
+  // Bypasses the URL entirely — Tailscale isn't an HTTP service worth
+  // pinging, so this asks the CLI whether the tailnet connection is
+  // actually up instead. `url` stays untouched as just the Enter-link.
+  if (service.tailscaleHealthCheck) {
+    const started = performance.now();
+    const result = await checkTailscaleStatus();
+    const status = result.online ? 'online' : 'offline';
+    statusCache.set(service.id, {
+      id: service.id,
+      status,
+      httpStatus: null,
+      latencyMs: Math.round(performance.now() - started),
+      lastChecked: new Date().toISOString(),
+      error: result.online ? null : result.detail,
+      detail: result.online ? result.detail : null,
+    });
+    recordHistory(service.id, status);
     return;
   }
 
@@ -106,6 +166,7 @@ async function runSweep(getConfig) {
   const config = await getConfig();
   const timeoutMs = config.settings.healthCheckTimeoutMs ?? 3000;
   await Promise.allSettled(config.services.map((s) => checkOne(s, timeoutMs)));
+  applyCascadingStatus(config.connections);
   const snapshot = getStatusSnapshot();
   logTransitions(snapshot, config.services);
   checkTransitions(snapshot, config);
@@ -155,6 +216,7 @@ export async function checkOneService(getConfig, serviceId) {
   if (!service) return null;
   const timeoutMs = config.settings.healthCheckTimeoutMs ?? 3000;
   await checkOne(service, timeoutMs);
+  applyCascadingStatus(config.connections);
   const snapshot = getStatusSnapshot();
   logTransitions(snapshot, config.services);
   checkTransitions(snapshot, config);

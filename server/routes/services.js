@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { loadConfig, saveConfig } from '../config.js';
 import { checkNow, checkOneService, forgetService } from '../healthChecker.js';
 import { sendMagicPacket, isValidMac } from '../wol.js';
+import { runControlCommand } from '../serviceControl.js';
+import { dockerContainerAction, getContainerLogs } from '../docker.js';
 import { logActivity } from '../activityLog.js';
 import { clientIp } from '../net.js';
 
@@ -14,6 +16,29 @@ function slugify(name) {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '') || `service-${Date.now()}`
   );
+}
+
+// Two controller types: 'script' (Wave A — arbitrary shell commands, one
+// per action, each optional so a service can have e.g. just a restart
+// hook) and 'docker' (Wave B — a container name/id; start/stop/restart are
+// standardized by the Docker Engine API itself, so there's nothing to
+// configure per-action beyond which container). Anything without a
+// meaningful value collapses to null rather than an empty-but-truthy
+// object, so "has a controller" stays a reliable check everywhere else.
+function normalizeController(body, existing) {
+  if (body.controller === undefined) return existing ?? null;
+  if (!body.controller || !body.controller.type) return null;
+  const c = body.controller;
+
+  if (c.type === 'docker') {
+    const container = (c.container || '').trim();
+    return container ? { type: 'docker', container } : null;
+  }
+
+  const startCmd = (c.startCmd || '').trim();
+  const stopCmd = (c.stopCmd || '').trim();
+  const restartCmd = (c.restartCmd || '').trim();
+  return startCmd || stopCmd || restartCmd ? { type: 'script', startCmd, stopCmd, restartCmd } : null;
 }
 
 servicesRouter.post('/', async (req, res) => {
@@ -40,9 +65,11 @@ servicesRouter.post('/', async (req, res) => {
     description: body.description || '',
     healthCheck: body.healthCheck !== false,
     healthCheckPath: body.healthCheckPath || '/',
+    tailscaleHealthCheck: body.tailscaleHealthCheck === true,
     tags: Array.isArray(body.tags) ? body.tags : [],
     pinned: body.pinned === true,
     mac,
+    controller: normalizeController(body, null),
   };
 
   config.services.push(service);
@@ -99,9 +126,11 @@ servicesRouter.put('/:id', async (req, res) => {
     description: body.description ?? existing.description,
     healthCheck: body.healthCheck !== undefined ? !!body.healthCheck : existing.healthCheck,
     healthCheckPath: body.healthCheckPath ?? existing.healthCheckPath,
+    tailscaleHealthCheck: body.tailscaleHealthCheck !== undefined ? !!body.tailscaleHealthCheck : existing.tailscaleHealthCheck,
     tags: Array.isArray(body.tags) ? body.tags : existing.tags,
     pinned: body.pinned !== undefined ? !!body.pinned : existing.pinned,
     mac,
+    controller: normalizeController(body, existing.controller),
   };
 
   await saveConfig(config);
@@ -123,6 +152,10 @@ servicesRouter.delete('/:id', async (req, res) => {
   await saveConfig(config);
   forgetService(req.params.id);
   logActivity('service', `Deleted "${deletedName}"`, clientIp(req));
+  // Anything that depended on the deleted service should stop showing
+  // degraded immediately rather than waiting out the rest of the current
+  // sweep interval — create/update already do this, delete was missing it.
+  checkNow(loadConfig).catch(() => {});
   res.status(204).end();
 });
 
@@ -151,5 +184,112 @@ servicesRouter.post('/:id/wake', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+const CONTROL_ACTIONS = {
+  start: { field: 'startCmd', verb: 'start' },
+  stop: { field: 'stopCmd', verb: 'stop' },
+  restart: { field: 'restartCmd', verb: 'restart' },
+};
+
+const lastControlAttempt = new Map(); // `${serviceId}:${action}` -> timestamp
+const CONTROL_COOLDOWN_MS = 2000; // guards against an accidental double-click/tap re-running a command
+
+// Runs a service's configured start/stop/restart command on the host.
+// Gated behind two independent switches on top of the app's normal
+// auth/session checks: security.serviceControl.enabled (an explicit opt-in
+// separate from just having a password set) and auth.enabled itself (this
+// feature runs commands on the host, so Settings won't let it be turned on
+// without password protection already active — see routes/settings.js).
+// Websites are excluded by convention, not by code: nothing stops someone
+// from pointing a controller at a website entry, but the Add/Edit modal
+// only surfaces these fields as an opt-in "advanced" section, so a website
+// simply never gets one filled in.
+async function handleControlAction(req, res, action) {
+  const config = await loadConfig();
+  if (!config.security?.serviceControl?.enabled) {
+    return res.status(403).json({ error: 'Service control is off — turn it on in Settings → Security.' });
+  }
+  if (!config.auth?.enabled) {
+    return res.status(403).json({ error: 'Service control requires password protection to be enabled first.' });
+  }
+
+  const service = config.services.find((s) => s.id === req.params.id);
+  if (!service) return res.status(404).json({ error: 'service not found' });
+  if (!service.controller) {
+    return res.status(400).json({ error: 'this service has no control commands configured' });
+  }
+
+  const { verb } = CONTROL_ACTIONS[action];
+  let run;
+
+  if (service.controller.type === 'script') {
+    const cmd = service.controller[CONTROL_ACTIONS[action].field];
+    if (!cmd) return res.status(400).json({ error: `no ${verb} command configured for this service` });
+    run = () => runControlCommand(cmd);
+  } else if (service.controller.type === 'docker') {
+    const container = service.controller.container;
+    run = async () => {
+      try {
+        await dockerContainerAction(container, action);
+        return { ok: true, output: `Docker ${verb} sent to "${container}"` };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    };
+  } else {
+    return res.status(400).json({ error: 'unsupported controller type' });
+  }
+
+  const cooldownKey = `${service.id}:${action}`;
+  const lastAttempt = lastControlAttempt.get(cooldownKey) || 0;
+  if (Date.now() - lastAttempt < CONTROL_COOLDOWN_MS) {
+    return res.status(429).json({ error: 'that command just ran — give it a moment' });
+  }
+  lastControlAttempt.set(cooldownKey, Date.now());
+
+  logActivity('control', `Running ${verb} for "${service.name}"`, clientIp(req));
+  const result = await run();
+  logActivity(
+    'control',
+    result.ok
+      ? `"${service.name}" ${verb} succeeded`
+      : `"${service.name}" ${verb} failed: ${result.error || 'unknown error'}`,
+    clientIp(req)
+  );
+
+  // Give the process a moment to actually change state before the health
+  // checker looks again, rather than racing it and reporting stale status.
+  setTimeout(() => {
+    checkOneService(loadConfig, service.id).catch(() => {});
+  }, 3000);
+
+  res.json(result);
+}
+
+servicesRouter.post('/:id/start', (req, res) => handleControlAction(req, res, 'start'));
+servicesRouter.post('/:id/stop', (req, res) => handleControlAction(req, res, 'stop'));
+servicesRouter.post('/:id/restart', (req, res) => handleControlAction(req, res, 'restart'));
+
+// Read-only, so unlike start/stop/restart this only needs the app's normal
+// session auth — not the security.serviceControl.enabled switch, since
+// there's no command being run here, just a container's own log buffer
+// being read. Only meaningful for a Docker-backed controller; a script
+// controller has no equivalent place to read logs from.
+servicesRouter.get('/:id/logs', async (req, res) => {
+  const config = await loadConfig();
+  const service = config.services.find((s) => s.id === req.params.id);
+  if (!service) return res.status(404).json({ error: 'service not found' });
+  if (!service.controller || service.controller.type !== 'docker') {
+    return res.status(400).json({ error: 'this service has no Docker container configured' });
+  }
+
+  const tail = Math.min(1000, Math.max(1, Number(req.query.tail) || 200));
+  try {
+    const logs = await getContainerLogs(service.controller.container, { tail });
+    res.json({ logs });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
   }
 });

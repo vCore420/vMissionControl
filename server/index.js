@@ -14,6 +14,7 @@ import { filesRouter } from './routes/files.js';
 import { chatRouter } from './routes/chat.js';
 import { devicesRouter } from './routes/devices.js';
 import { discoveryRouter } from './routes/discovery.js';
+import { dockerRouter } from './routes/docker.js';
 import { configTransferRouter } from './routes/configTransfer.js';
 import { authRouter } from './routes/auth.js';
 import { requireAuth, requireCsrfHeader } from './auth.js';
@@ -67,6 +68,7 @@ app.use('/api/files', filesRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/devices', devicesRouter);
 app.use('/api/discovery', discoveryRouter);
+app.use('/api/docker', dockerRouter);
 app.use('/api/config', configTransferRouter);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));

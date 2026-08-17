@@ -86,6 +86,15 @@ settingsRouter.put('/', async (req, res) => {
     );
   }
 
+  if (body.security?.serviceControl) {
+    const wantsEnabled = !!body.security.serviceControl.enabled;
+    if (wantsEnabled && !config.auth?.enabled) {
+      return res.status(400).json({ error: 'enable password protection before turning on service control' });
+    }
+    config.security = { ...config.security, serviceControl: { enabled: wantsEnabled } };
+    logActivity('settings', `Service control ${wantsEnabled ? 'enabled' : 'disabled'}`, ip);
+  }
+
   await saveConfig(config);
   res.json({ settings: config.settings, sharedFolder: config.sharedFolder, alerts: config.alerts, security: config.security });
 });

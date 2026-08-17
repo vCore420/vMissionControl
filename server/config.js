@@ -54,6 +54,25 @@ async function migrate(config) {
     config.security = { ipAllowlist: { enabled: false, subnets: [] } };
     changed = true;
   }
+  // Service control (start/stop/restart via a per-service script hook) runs
+  // commands on the host, so it gets its own opt-in switch on top of
+  // everything else — off by default even if a service already has a
+  // controller configured, and refused at request time (routes/services.js)
+  // unless password auth is also on, per the security pass agreed before
+  // this feature was built.
+  if (!config.security.serviceControl) {
+    config.security.serviceControl = { enabled: false };
+    changed = true;
+  }
+  // Connections predate the depends-on/related distinction — anything
+  // without a type is what every connection used to mean: just "related",
+  // undirected, no cascading-status implication.
+  for (const conn of config.connections) {
+    if (!conn.type) {
+      conn.type = 'related';
+      changed = true;
+    }
+  }
   if (changed) await saveConfig(config);
   return config;
 }

@@ -20,6 +20,14 @@ On Windows, [start.bat](start.bat) does both for you — double-click it (it
 skips `npm install` if `node_modules` already exists, and skips starting a
 second server if one's already running on port 5000).
 
+To stop it, use [stop.bat](stop.bat) rather than just closing its console
+window — closing the window doesn't always reliably kill the underlying
+Node process on Windows, which can leave an invisible orphaned instance
+running in the background indefinitely. stop.bat finds whatever's on port
+5000, asks it to shut down cleanly, and force-closes it only if that
+doesn't work. [restart.bat](restart.bat) does both start and stop in one
+step, for the same reason.
+
 The server binds `0.0.0.0`, so it's reachable both at `http://localhost:5000`
 and at your machine's LAN address (printed on startup, e.g.
 `http://192.168.1.23:5000`) — open that from your phone or another computer
@@ -89,14 +97,23 @@ or a reverse proxy that terminates TLS) — worth its own pass if you want it,
 not done here since it's a meaningfully bigger chunk of setup than the
 PWA groundwork itself.
 
-The service worker only caches the static app shell (HTML/CSS/JS/icons) for
-fast, resilient loading — it deliberately never caches `/api/*`, since this
+The service worker caches the static app shell (HTML/CSS/JS/icons) purely
+as an offline fallback — it deliberately never caches `/api/*`, since this
 app only exists to show *live* status and serving stale health data back
-from a cache would be actively misleading. If you add a new stylesheet or
-script to `index.html`, add it to `SHELL_URLS` in
-[service-worker.js](public/service-worker.js) and bump `CACHE_NAME`, or the
-installed app will keep serving the old version until the cache expires on
-its own.
+from a cache would be actively misleading. Fetches are **network-first**:
+every load tries the network before ever touching the cache, so an
+installed/PWA'd device always gets the current version whenever it has
+connectivity, and only falls back to whatever it has cached when the
+network request genuinely fails. (An earlier stale-while-revalidate
+version served the cached shell instantly and only refreshed it in the
+background — which meant a device that cached the app mid-edit could get
+stuck replaying that same frozen, half-updated snapshot indefinitely,
+since it never had a reason to prefer the network. See
+[.claude/DEV_NOTES.md](.claude/DEV_NOTES.md) for the incident that
+prompted the change.) If you add a new stylesheet or script to
+`index.html`, still add it to `SHELL_URLS` in
+[service-worker.js](public/service-worker.js) and bump `CACHE_NAME` — that
+part hasn't changed, it's what lets old cached files get cleaned up.
 
 ## What it does
 
@@ -216,13 +233,22 @@ its own.
   Prev/Next cycling through whatever previewable files were in the same
   listing — a folder's contents or a set of search results either way.
 - **Themes** — Dark, Light, Cyberpunk, Pride, Cute, Cozy, Her, Forest,
-  Ocean, Matrix, Nord, Sunset, Vaporwave, and Mono, picked from a swatch
-  grid in Settings → Appearance. Every color in the app is a
-  CSS custom property, so a theme is just a full re-declaration of that
-  token set — status colors (online/offline/unmonitored/checking) are
-  re-tuned per theme but always keep their green/red/gray/amber meaning.
-  Saved per-browser (`localStorage`), applied before first paint so there's
-  no flash of the wrong palette on reload.
+  Ocean, Matrix, Nord, Sunset, Vaporwave, Mono, Dracula, Solarized, and
+  High Contrast, picked from a swatch grid in Settings → Appearance. Every
+  color in the app is a CSS custom property, so a theme is just a full
+  re-declaration of that token set — status colors (online/offline/
+  unmonitored/checking) are re-tuned per theme but always keep their
+  green/red/gray/amber meaning. Saved per-browser (`localStorage`),
+  applied before first paint so there's no flash of the wrong palette on
+  reload.
+- **Custom theme** — a 15th-and-a-half option alongside the presets: pick
+  your own Background, Text, Accent, Border, and the four status colors
+  from a compact 8-swatch panel, and the rest of the token set (card/panel
+  surfaces, hover states, dimmed text, accent-dim) is derived from those
+  automatically, the same lighten/darken relationships the presets
+  themselves use. Applies live as you pick and saves immediately — no
+  separate save step — and sticks around as "Custom" until you edit it
+  again. Same before-first-paint, no-flash treatment as the presets.
 - **Connected Devices** (Settings) — every device that's hit this server,
   by IP, a parsed browser/OS label, first/last seen, and a request count as
   a simple traffic indicator. The dot shows whether it's connected right

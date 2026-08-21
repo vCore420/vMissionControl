@@ -5,6 +5,7 @@ import multer from 'multer';
 import { loadConfig, resolveSharedFolderPath } from '../config.js';
 import { logActivity } from '../activityLog.js';
 import { clientIp } from '../net.js';
+import { planZip, streamPlannedZip, ZipTooLargeError } from '../zip.js';
 
 export const filesRouter = Router();
 
@@ -65,6 +66,46 @@ filesRouter.get('/download', async (req, res) => {
   } catch (err) {
     if (err instanceof PathError) return res.status(400).json({ error: err.message });
     res.status(404).json({ error: 'file not found' });
+  }
+});
+
+// Zips a folder on the fly and streams it straight into the response —
+// see server/zip.js for why this is hand-rolled instead of a dependency.
+// planZip walks the tree and enforces the size cap *before* any response
+// headers go out, so an oversized folder still comes back as a normal
+// JSON error instead of a broken download. A failure once streaming has
+// actually started has no clean way to become a different HTTP status
+// (the 200 is already committed), so that case just tears the connection
+// down — the client sees a failed/truncated download rather than
+// silently getting a corrupt one.
+filesRouter.get('/download-zip', async (req, res) => {
+  let target;
+  try {
+    target = await safeResolve(req.mcConfig, req.query.path);
+    const stat = await fs.stat(target);
+    if (!stat.isDirectory()) return res.status(400).json({ error: 'not a folder' });
+  } catch (err) {
+    if (err instanceof PathError) return res.status(400).json({ error: err.message });
+    return res.status(404).json({ error: 'folder not found' });
+  }
+
+  const folderName = path.basename(target) || 'shared';
+  try {
+    const { entries } = await planZip(target);
+    res.writeHead(200, {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(folderName)}.zip"`,
+    });
+    await streamPlannedZip(res, entries);
+    res.end();
+  } catch (err) {
+    if (res.headersSent) {
+      res.destroy();
+    } else if (err instanceof ZipTooLargeError) {
+      res.status(413).json({ error: err.message });
+    } else {
+      res.status(500).json({ error: err.message });
+    }
   }
 });
 
@@ -196,18 +237,41 @@ filesRouter.get('/recent', (req, res) => {
 // approach held the entire file in RAM before ever touching disk, which
 // is a real problem once uploads include video/music instead of just
 // small config-style files.
+// A whole-folder upload sends each file's path *within* the folder being
+// uploaded (e.g. "Vacation2026/beach.jpg", from the browser's own
+// File.webkitRelativePath) as a `relPath` form field placed ahead of the
+// file field — multer only has it in req.body by the time these callbacks
+// run if the client appended it to the FormData before the file, since a
+// multipart body is parsed in stream order. Falls back to the plain
+// filename when relPath isn't sent, so a normal single/multi-file upload
+// (no relPath) behaves exactly as it did before this existed.
+// destination() stashes the resolved full relative path on req so both
+// filename() and the route handler below reuse the same value instead of
+// three slightly-different recomputations of it.
 const upload = multer({
   storage: multer.diskStorage({
     destination: async (req, file, cb) => {
       try {
         const config = await loadConfig();
-        const dir = await safeResolve(config, req.query.path);
+        const relPath = typeof req.body?.relPath === 'string' && req.body.relPath ? req.body.relPath : path.basename(file.originalname);
+        req.mcUploadRelPath = req.query.path ? `${req.query.path}/${relPath}` : relPath;
+        const subDir = relPath.includes('/') ? relPath.slice(0, relPath.lastIndexOf('/')) : '';
+        const dirRelPath = req.query.path ? `${req.query.path}${subDir ? '/' + subDir : ''}` : subDir;
+        const dir = await safeResolve(config, dirRelPath);
+        // multer's diskStorage expects this directory to already exist —
+        // it never creates intermediate folders itself, which a plain
+        // single-file upload never needed since it always lands in a
+        // folder the user is already looking at.
+        await fs.mkdir(dir, { recursive: true });
         cb(null, dir);
       } catch (err) {
         cb(err);
       }
     },
-    filename: (req, file, cb) => cb(null, path.basename(file.originalname)),
+    filename: (req, file, cb) => {
+      const relPath = typeof req.body?.relPath === 'string' && req.body.relPath ? req.body.relPath : file.originalname;
+      cb(null, path.basename(relPath));
+    },
   }),
   limits: { fileSize: 5 * 1024 * 1024 * 1024 },
 });
@@ -228,7 +292,7 @@ filesRouter.post('/upload', requireUploadAllowed, upload.single('file'), async (
   if (!req.file) return res.status(400).json({ error: 'no file provided' });
 
   const name = req.file.filename;
-  const relPath = req.query.path ? `${req.query.path}/${name}` : name;
+  const relPath = req.mcUploadRelPath || (req.query.path ? `${req.query.path}/${name}` : name);
   recordUpload(relPath, name, req.file.size);
   logActivity('file', `Uploaded "${relPath}"`, clientIp(req));
   res.status(201).json({ ok: true, name });

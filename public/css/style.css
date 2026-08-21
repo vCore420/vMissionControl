@@ -2684,8 +2684,220 @@ legend {
   font-size: 0.85rem;
 }
 
+/* ---------- Timesheets ---------- */
+/* A dedicated .ts- prefix rather than reusing .settings-section/.modal-card
+   form styles — those are scoped to their own narrower context (a card of
+   dividered sections, a popup form) and don't fit a view-level column of
+   several distinct cards. Buttons still reuse the real .btn/.btn.ghost/
+   .btn.danger classes; everything else (color, radius, shadow) reuses the
+   same design tokens those do, so this still reads as Mission Control
+   rather than a pasted-in tool. Leave-type colors map onto existing status
+   tokens instead of the standalone tool's own hardcoded palette, so both
+   the UI and the generated PNG (timesheet.js) re-skin with every theme. */
+
+.ts-wrap {
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.ts-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px 20px;
+}
+
+.ts-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.ts-field:last-child { margin-bottom: 0; }
+.ts-field label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.ts-field-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.ts-field-row .ts-field { flex: 1 1 120px; }
+
+.ts-wrap input[type="text"],
+.ts-wrap input[type="date"],
+.ts-wrap input[type="number"],
+.ts-wrap select {
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text);
+  min-height: 38px;
+  width: 100%;
+}
+.ts-wrap input[type="number"] {
+  font-family: var(--font-mono);
+}
+
+.ts-hint { margin: 2px 0 0; font-size: 0.76rem; color: var(--text-faint); }
+
+.ts-week-card-header,
+.ts-history-card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.ts-week-card-header h2,
+.ts-history-card-header h2 { margin: 0; font-size: 1.05rem; }
+.ts-week-dates { margin: 0; font-size: 0.78rem; color: var(--text-dim); font-family: var(--font-mono); }
+
+.ts-weekend-toggles { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; }
+.ts-weekend-toggle { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--text-dim); cursor: pointer; }
+.ts-weekend-toggle input { width: 16px; height: 16px; }
+
+.ts-day-row {
+  border-left: 4px solid var(--accent);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 8px 12px 12px;
+  margin-bottom: 2px;
+  border-radius: 0 8px 8px 0;
+}
+.ts-day-row:last-child { border-bottom: none; }
+.ts-day-row[data-type="annual"] { border-left-color: var(--checking); }
+.ts-day-row[data-type="sick"] { border-left-color: var(--offline); }
+.ts-day-row[data-type="holiday"] { border-left-color: var(--online); }
+.ts-day-row[data-type="other"] { border-left-color: var(--unmonitored); }
+.ts-day-row.ts-is-today { background: var(--bg-card-hover); }
+
+.ts-day-row-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.ts-day-date { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ts-day-name { font-weight: 700; font-size: 0.82rem; }
+.ts-day-date-num { font-size: 0.76rem; color: var(--text-dim); font-family: var(--font-mono); }
+.ts-today-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.ts-type-select { max-width: 160px; min-height: 34px; padding: 6px 8px; font-size: 0.78rem; }
+
+/* Collapsed-row summary + chevron, and the Settings accordion toggle —
+   invisible here so desktop keeps every row/card fully expanded exactly as
+   before this existed. Given real content and shown only inside the mobile
+   media query below, where every .ts-day-row starts collapsed except
+   today's (see timesheet.js's expandedRows) and .ts-card[data-role=
+   "settings-card"] starts collapsed outright — a phone lands on a short,
+   scannable week view instead of 14 open forms under a settings block. */
+.ts-row-summary-hours,
+.ts-row-chevron,
+.ts-settings-toggle {
+  display: none;
+}
+
+.ts-day-row-fields { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ts-time-fields { display: flex; gap: 10px; flex-wrap: wrap; flex: 1 1 auto; }
+.ts-time-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 0.68rem; color: var(--text-dim); flex: 1 1 84px; }
+.ts-time-fields select { min-height: 36px; font-size: 0.82rem; padding: 6px 8px; }
+.ts-time-input-group { display: flex; flex-direction: column; gap: 4px; }
+
+.ts-clock-btn {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  min-height: auto;
+  width: auto;
+}
+.ts-clock-btn:hover { background: var(--accent); color: #fff; }
+
+.ts-full-day-label { font-size: 0.78rem; color: var(--text-dim); font-style: italic; }
+.ts-leave-note { flex: 1 1 160px; }
+
+.ts-hours-badge {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.82rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.ts-week-total { text-align: right; font-weight: 700; font-size: 0.82rem; margin: 14px 0 0; padding-top: 10px; border-top: 1px solid var(--border); color: var(--text); }
+
+.ts-summary-card { display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
+.ts-stamp {
+  border: 2px solid var(--accent);
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 12px 26px;
+  transform: rotate(-3deg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+}
+.ts-stamp-total { font-family: var(--font-mono); font-size: 1.5rem; font-weight: 700; }
+.ts-stamp-label { font-size: 0.64rem; letter-spacing: 1px; text-transform: uppercase; }
+
+.ts-summary-list { display: flex; gap: 22px; margin: 0; flex-wrap: wrap; justify-content: center; padding: 0; }
+.ts-summary-list > div { display: flex; flex-direction: column; align-items: center; }
+.ts-summary-list dt { font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-dim); margin: 0; }
+.ts-summary-list dd { margin: 2px 0 0; font-family: var(--font-mono); font-size: 1.05rem; font-weight: 700; color: var(--text); }
+
+.ts-leave-breakdown { margin: 0; font-size: 0.78rem; color: var(--text-dim); }
+
+.ts-export-card { display: flex; flex-direction: column; gap: 14px; }
+.ts-export-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.ts-export-actions .btn { flex: 1 1 auto; }
+
+.ts-export-preview { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.ts-export-preview img { width: 100%; border-radius: 8px; border: 1px solid var(--border); }
+.ts-export-hint { margin: 0; font-size: 0.74rem; color: var(--text-dim); text-align: center; }
+.ts-export-preview .btn { width: 100%; text-align: center; }
+.ts-save-note { margin: 0; font-size: 0.74rem; color: var(--text-faint); text-align: center; }
+
+.ts-history-list { display: flex; flex-direction: column; gap: 8px; }
+.ts-history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.ts-history-dates { font-size: 0.78rem; font-family: var(--font-mono); color: var(--text); }
+.ts-history-view-btn { padding: 7px 12px; min-height: auto; font-size: 0.78rem; }
+.ts-history-view-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
 @media (max-width: 720px) {
   .toolbar { flex-wrap: wrap; }
+
+  /* Four tabs (Dashboard/Files/Chat/Timesheets) at full padding measured
+     out to exactly the width of a 375px viewport with zero slack left —
+     any device whose system font renders those labels even slightly wider
+     tips it into a real horizontal overflow. Tighter padding buys back
+     some margin; flex-wrap is the actual safety net, so a device that
+     still doesn't fit gracefully drops to two rows instead of clipping. */
+  .view-switch { flex-wrap: wrap; width: 100%; }
+  .view-switch button { padding: 7px 12px; font-size: 0.8rem; }
 
   /* Search needs to actually be usable, not squeezed to near-nothing by
      two buttons fighting it for space — it takes whatever's left, the
@@ -2907,6 +3119,71 @@ legend {
     stroke-width: 3;
     opacity: 0.8;
   }
+
+  /* Timesheets: a wall of 14 fully-open day rows under a settings form was
+     the actual "hard to understand up front" problem — collapsing both
+     (today's row stays open; the Settings card starts closed; everything
+     else is a tap away — see timesheet.js's expandedRows/toggleRowExpanded
+     and bindSettingsToggle) turns the page into a short, scannable list
+     instead. Every rule in this block only exists in here, and the
+     elements it shows are display:none outside it (the base .ts-row-
+     summary-hours/.ts-row-chevron/.ts-settings-toggle rule above) — so
+     none of it can reach desktop, which stays exactly as it was. */
+
+  .ts-settings-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: var(--text);
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .ts-settings-toggle h2 { margin: 0; font-size: 0.95rem; }
+  .ts-settings-body { display: none; }
+  [data-role="settings-card"].ts-open .ts-settings-toggle { margin-bottom: 14px; }
+  [data-role="settings-card"].ts-open .ts-settings-body { display: block; }
+  [data-role="settings-card"].ts-open [data-role="settings-chevron"] { transform: rotate(180deg); }
+
+  /* Collapsed (default): one line — day/date, hours, chevron. The type
+     select and the full editing row only render once tapped open, same
+     "drop to its own full-width row instead of squeezing onto one" fix as
+     everywhere else on mobile, just gated behind .ts-expanded now instead
+     of being unconditional. */
+  .ts-day-row-top { flex-wrap: wrap; cursor: pointer; }
+  .ts-row-summary-hours {
+    display: block;
+    margin-left: auto;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .ts-row-chevron {
+    display: block;
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    color: var(--text-faint);
+    margin-left: 2px;
+    transition: transform 0.15s ease;
+  }
+  .ts-type-select,
+  .ts-day-row-fields {
+    display: none;
+  }
+  .ts-day-row.ts-expanded .ts-row-summary-hours { display: none; }
+  .ts-day-row.ts-expanded .ts-type-select { display: block; max-width: none; width: 100%; }
+  .ts-day-row.ts-expanded .ts-day-row-fields { display: flex; }
+  .ts-day-row.ts-expanded .ts-row-chevron { transform: rotate(180deg); }
+
+  .ts-time-fields label { flex: 1 1 90px; }
+  .ts-hours-badge { margin-left: 0; width: 100%; text-align: center; }
+  .ts-export-actions .btn { flex: 1 1 100%; }
 }
 
 .login-wrap {

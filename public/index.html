@@ -51,6 +51,7 @@
       <button data-view="dashboard" class="active">Dashboard</button>
       <button data-view="files">Files</button>
       <button data-view="chat">Chat<span class="nav-badge hidden" id="chatBadge">0</span></button>
+      <button data-view="timesheet">Timesheets</button>
     </nav>
     <div class="toolbar-dashboard-controls" id="toolbarDashboardControls">
       <input id="search" type="search" placeholder="Search services…" />
@@ -161,6 +162,114 @@
           </div>
         </form>
       </div>
+    </div>
+  </main>
+
+  <main id="timesheetView" class="view">
+    <div class="ts-wrap">
+      <section class="ts-card" aria-label="Timesheet settings" data-role="settings-card">
+        <button type="button" class="ts-settings-toggle" data-role="settings-toggle" aria-expanded="false">
+          <h2>Settings</h2>
+          <span class="ts-row-chevron" data-role="settings-chevron" aria-hidden="true">⌄</span>
+        </button>
+        <div class="ts-settings-body" data-role="settings-body">
+          <div class="ts-field">
+            <label for="tsInputName">Your name (optional)</label>
+            <input type="text" id="tsInputName" placeholder="e.g. Jordan Smith" autocomplete="name">
+          </div>
+          <div class="ts-field">
+            <label for="tsInputPeriodStart">Current fortnight starts (Monday)</label>
+            <input type="date" id="tsInputPeriodStart">
+            <p class="ts-hint">Rolls forward automatically every 2 weeks — change this only to correct your pay cycle.</p>
+          </div>
+          <div class="ts-field-row">
+            <div class="ts-field">
+              <label for="tsInputDefaultStart">Default start</label>
+              <select id="tsInputDefaultStart"></select>
+            </div>
+            <div class="ts-field">
+              <label for="tsInputDefaultFinish">Default finish</label>
+              <select id="tsInputDefaultFinish"></select>
+            </div>
+            <div class="ts-field">
+              <label for="tsInputDefaultLunch">Default lunch (min)</label>
+              <input type="number" id="tsInputDefaultLunch" min="0" step="5">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="ts-card ts-week-card" data-week-index="0">
+        <header class="ts-week-card-header">
+          <h2>Week 1</h2>
+          <p class="ts-week-dates" data-role="week-dates"></p>
+        </header>
+        <div class="ts-weekend-toggles">
+          <label class="ts-weekend-toggle">
+            <input type="checkbox" data-role="day-toggle" data-week="0" data-day="5">
+            Include Saturday
+          </label>
+          <label class="ts-weekend-toggle">
+            <input type="checkbox" data-role="day-toggle" data-week="0" data-day="6">
+            Include Sunday
+          </label>
+        </div>
+        <div class="ts-day-list" data-role="day-list" data-week="0"></div>
+        <p class="ts-week-total" data-role="week-total"></p>
+      </section>
+
+      <section class="ts-card ts-week-card" data-week-index="1">
+        <header class="ts-week-card-header">
+          <h2>Week 2</h2>
+          <p class="ts-week-dates" data-role="week-dates"></p>
+        </header>
+        <div class="ts-weekend-toggles">
+          <label class="ts-weekend-toggle">
+            <input type="checkbox" data-role="day-toggle" data-week="1" data-day="5">
+            Include Saturday
+          </label>
+          <label class="ts-weekend-toggle">
+            <input type="checkbox" data-role="day-toggle" data-week="1" data-day="6">
+            Include Sunday
+          </label>
+        </div>
+        <div class="ts-day-list" data-role="day-list" data-week="1"></div>
+        <p class="ts-week-total" data-role="week-total"></p>
+      </section>
+
+      <section class="ts-card ts-summary-card">
+        <div class="ts-stamp">
+          <span class="ts-stamp-total" data-role="stamp-total">0.00</span>
+          <span class="ts-stamp-label">hrs this period</span>
+        </div>
+        <dl class="ts-summary-list">
+          <div><dt>Hours worked</dt><dd data-role="worked-hours">0.00</dd></div>
+          <div><dt>Leave hours</dt><dd data-role="leave-hours">0.00</dd></div>
+          <div><dt>Total hours</dt><dd data-role="total-hours">0.00</dd></div>
+        </dl>
+        <p class="ts-leave-breakdown" data-role="leave-breakdown"></p>
+      </section>
+
+      <section class="ts-card ts-export-card">
+        <div class="ts-export-actions">
+          <button id="tsGenerateBtn" class="btn" type="button">Generate timesheet image</button>
+          <button id="tsResetBtn" class="btn danger" type="button">Clear this fortnight</button>
+        </div>
+        <div class="ts-export-preview hidden" data-role="export-preview">
+          <img id="tsExportImage" alt="Generated timesheet image">
+          <p class="ts-export-hint">Long-press the image to save or share it — or use the download link below.</p>
+          <a id="tsExportDownload" class="btn ghost" download="timesheet.png">Download PNG</a>
+        </div>
+        <p class="ts-save-note">Entries save straight to Mission Control — every device sees the same current fortnight.</p>
+      </section>
+
+      <section class="ts-card ts-history-card hidden" data-role="history-card">
+        <header class="ts-history-card-header">
+          <h2>Previous pay periods</h2>
+        </header>
+        <p class="ts-hint">Snapshots of past fortnights, saved server-side so they're never lost.</p>
+        <div class="ts-history-list" data-role="history-list"></div>
+      </section>
     </div>
   </main>
 
@@ -292,7 +401,7 @@
         </div>
         <div class="settings-section">
           <h3>External Alerts
-            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Fires even when nobody has this dashboard open, unlike the in-page toast and desktop notification above. Save first, then send a test to confirm the URL actually works.</span></button>
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Fires even when nobody has this dashboard open, unlike the in-page toast and desktop notification above. Service status changes include the reason (timeout, connection refused, ...) and, for Docker-controlled services going offline, a recent slice of the container's own log. Also fires for new devices, IP allowlist / Service Control changes, password changes, and login lockouts — not routine settings tweaks or ordinary sign-ins. Save first, then send a test to confirm the URL actually works.</span></button>
           </h3>
           <label class="checkbox-row">
             <input type="checkbox" id="alertsEnabled" />

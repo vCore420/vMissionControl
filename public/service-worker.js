@@ -26,7 +26,7 @@
 // where every device hits this service worker again to re-authenticate at
 // once. Now a request that hasn't resolved within FETCH_TIMEOUT_MS aborts
 // and falls back to cache like any other failure.
-const CACHE_NAME = 'mission-control-shell-v5';
+const CACHE_NAME = 'mission-control-shell-v6';
 const FETCH_TIMEOUT_MS = 6000;
 const SHELL_URLS = [
   '/',
@@ -38,6 +38,7 @@ const SHELL_URLS = [
   '/js/chat.js',
   '/js/settings.js',
   '/js/omnibox.js',
+  '/js/timesheet.js',
   '/js/api.js',
   '/js/connections.js',
   '/js/ws.js',

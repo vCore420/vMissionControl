@@ -198,6 +198,19 @@ part hasn't changed, it's what lets old cached files get cleaned up.
   it age out of the 200-cap deletes its file too. Deliberately not a
   replacement for the shared folder below, which is what actually owns
   moving files that aren't part of a conversation.
+- **Timesheets** — a fortnightly hours tracker: day-by-day work/leave entries
+  (Work, Annual Leave, Sick Leave, Public Holiday, Other — each with its own
+  color, re-skinned per theme like everything else) across two week cards,
+  live totals, and a canvas-rendered PNG snapshot per pay period. The
+  fortnight rolls forward automatically (checked lazily on every load, so
+  two devices open at once can't race each other into creating two
+  different "next" periods) and the profile/entries are stored server-side
+  (`server/data/timesheet.json`) rather than per-device — every device sees
+  the same current fortnight, and edits sync live over the same WebSocket
+  as everything else. Generated period-snapshot images save to
+  `server/data/timesheets/` so they're never lost; a small IndexedDB cache
+  on each device avoids re-fetching one already viewed, pruned against
+  whatever periods the server still lists.
 - **Status-change notifications** — an in-page toast fires on every
   online↔offline transition. Turn on "Notify me..." in Settings for
   desktop notifications too — these need browser permission and only work

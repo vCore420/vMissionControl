@@ -1,7 +1,7 @@
 import { connectWebSocket } from './ws.js';
 import {
   state, el, toast, callbacks, loadAll, pollStatus,
-  handleWsStatus, handleWsConfig, handleWsChatMessage, handleWsChatMessageDeleted,
+  handleWsStatus, handleWsConfig, handleWsChatMessage, handleWsChatMessageDeleted, handleWsTimesheet,
 } from './core.js';
 import { renderGroupFilters, renderCards, renderOnlineBadge, renderCardStatuses } from './dashboard.js';
 import { renderFiles } from './files.js';
@@ -9,6 +9,7 @@ import {
   renderChatBadge, renderChatChannels, renderChatMessages, switchChannel, renderDeviceNameLabel,
 } from './chat.js';
 import { pollHostHealth } from './settings.js';
+import { renderTimesheet } from './timesheet.js';
 import './omnibox.js';
 
 // Entry point: registers the service worker, wires core.js's sync-engine
@@ -38,6 +39,7 @@ callbacks.renderChatBadge = renderChatBadge;
 callbacks.renderChatChannels = renderChatChannels;
 callbacks.renderChatMessages = renderChatMessages;
 callbacks.switchChannel = switchChannel;
+callbacks.renderTimesheet = renderTimesheet;
 
 // ---------- View switching ----------
 
@@ -65,6 +67,7 @@ el('viewSwitch').addEventListener('click', (e) => {
       renderChatMessages();
     }
   }
+  if (view === 'timesheet') renderTimesheet({ forceFetch: true });
 });
 
 // ---------- Render + boot ----------
@@ -83,4 +86,5 @@ connectWebSocket({
   config: handleWsConfig,
   chatMessage: handleWsChatMessage,
   chatMessageDeleted: handleWsChatMessageDeleted,
+  timesheet: handleWsTimesheet,
 });

@@ -37,6 +37,12 @@ export const state = {
     ? localStorage.getItem('mc:chatView')
     : 'tabs',
   settingsTab: localStorage.getItem('mc:settingsTab') || 'appearance',
+  // Populated on first visit to the Timesheets tab and kept current by the
+  // 'timesheet' WS broadcast — the server is the one source of truth for
+  // both, so there's no separate per-device copy the way chat messages
+  // briefly are before the network round-trip.
+  timesheetProfile: null,
+  timesheetPeriod: null,
 };
 
 export const el = (id) => document.getElementById(id);
@@ -322,6 +328,7 @@ export const callbacks = {
   renderChatChannels: () => {},
   renderChatMessages: () => {},
   switchChannel: () => {},
+  renderTimesheet: () => {},
 };
 
 export function applyStatus(list) {
@@ -391,6 +398,18 @@ export function handleWsChatMessageDeleted(msg) {
   state.chatMessages.set(msg.channelId, list.filter((m) => m.id !== msg.messageId));
   if (el('chatView').classList.contains('active') && state.activeChannelId === msg.channelId) {
     callbacks.renderChatMessages();
+  }
+}
+
+// A second open device's edit (or a server-side fortnight rollover)
+// arriving live. Always updates state — a background tab still needs
+// current data waiting for it when switched to — but only re-renders the
+// DOM if Timesheets is the visible view, same guard chat messages use.
+export function handleWsTimesheet(msg) {
+  state.timesheetProfile = msg.profile;
+  state.timesheetPeriod = msg.period;
+  if (el('timesheetView').classList.contains('active')) {
+    callbacks.renderTimesheet();
   }
 }
 

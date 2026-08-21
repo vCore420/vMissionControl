@@ -134,4 +134,28 @@ export const api = {
     if (!res.ok) throw new Error(data?.error || 'upload failed');
     return data;
   },
+
+  getTimesheet: () => request('GET', '/api/timesheet'),
+  saveTimesheetProfile: (fields) => request('PUT', '/api/timesheet/profile', fields),
+  switchTimesheetPeriod: (periodStart) => request('PUT', '/api/timesheet/period-start', { periodStart }),
+  saveTimesheetEntries: (body) => request('PUT', '/api/timesheet/entries', body),
+  resetTimesheetPeriod: () => request('POST', '/api/timesheet/reset'),
+  listTimesheetPeriods: () => request('GET', '/api/timesheet/periods'),
+  timesheetImageUrl: (periodStart) => `/api/timesheet/periods/${encodeURIComponent(periodStart)}/image`,
+  uploadTimesheetImage: async (periodStart, blob) => {
+    const form = new FormData();
+    form.append('image', blob, `${periodStart}.png`);
+    const res = await fetch(`/api/timesheet/periods/${encodeURIComponent(periodStart)}/image`, {
+      method: 'POST',
+      headers: { ...CSRF_HEADERS },
+      body: form,
+    });
+    if (res.status === 401) {
+      handleAuthFailure();
+      throw new Error('signed out — redirecting to login');
+    }
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || 'image upload failed');
+    return data;
+  },
 };

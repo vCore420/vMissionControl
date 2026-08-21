@@ -123,6 +123,13 @@ function renderFilesListView(items) {
       dl.textContent = '⬇';
       dl.title = 'Download';
       actions.appendChild(dl);
+    } else {
+      const dlZip = document.createElement('a');
+      dlZip.href = api.downloadZipUrl(rowPath);
+      dlZip.textContent = '📦';
+      dlZip.title = 'Download as .zip';
+      dlZip.onclick = (ev) => ev.stopPropagation(); // don't also trigger the row's own "open this folder" click
+      actions.appendChild(dlZip);
     }
     const rename = document.createElement('button');
     rename.textContent = '✎';
@@ -463,11 +470,15 @@ el('mkdirBtn').addEventListener('click', async () => {
   }
 });
 
+// file.webkitRelativePath is only populated for files picked through the
+// folder input below (e.g. "Vacation2026/beach.jpg") — empty string for a
+// normal file-picker or drag-drop selection, which keeps those landing
+// flat in the current folder exactly as before this existed.
 async function uploadFiles(files) {
   let uploaded = 0;
   for (const file of files) {
     try {
-      await api.uploadFile(state.filesPath, file);
+      await api.uploadFile(state.filesPath, file, file.webkitRelativePath || undefined);
       uploaded += 1;
     } catch (err) {
       toast(`${file.name}: ${err.message}`, true);
@@ -481,6 +492,13 @@ async function uploadFiles(files) {
 
 el('uploadBtn').addEventListener('click', () => el('uploadInput').click());
 el('uploadInput').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if (files.length) await uploadFiles(files);
+});
+
+el('uploadFolderBtn').addEventListener('click', () => el('uploadFolderInput').click());
+el('uploadFolderInput').addEventListener('change', async (e) => {
   const files = Array.from(e.target.files || []);
   e.target.value = '';
   if (files.length) await uploadFiles(files);

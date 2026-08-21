@@ -283,6 +283,70 @@
   --dot: rgba(240, 240, 240, 0.05);
 }
 
+/* Three real, recognizable palettes rather than three more arbitrary
+   hues: Dracula and Solarized Dark are both well-known, precisely-defined
+   developer color schemes (hex values taken from their actual published
+   palettes, not approximated), and High Contrast fills a genuine gap none
+   of the other 13 themes cover — maximum-legibility black/white with
+   pure, maximally-distinguishable status colors, for actual accessibility
+   rather than just another look. */
+:root[data-theme="dracula"] {
+  --bg: #282a36;
+  --bg-elevated: #2f3140;
+  --bg-card: #343746;
+  --bg-card-hover: #3d4052;
+  --bg-panel: #262834;
+  --border: #44475a;
+  --text: #f8f8f2;
+  --text-dim: #b4b6c4;
+  --text-faint: #6272a4;
+  --accent: #bd93f9;
+  --accent-dim: #6a5490;
+  --online: #50fa7b;
+  --offline: #ff5555;
+  --unmonitored: #6272a4;
+  --checking: #f1fa8c;
+  --dot: rgba(248, 248, 242, 0.08);
+}
+
+:root[data-theme="solarized"] {
+  --bg: #002b36;
+  --bg-elevated: #073642;
+  --bg-card: #0a4150;
+  --bg-card-hover: #0e4d5e;
+  --bg-panel: #013640;
+  --border: #0a4a58;
+  --text: #93a1a1;
+  --text-dim: #657b83;
+  --text-faint: #586e75;
+  --accent: #268bd2;
+  --accent-dim: #1b5e8f;
+  --online: #859900;
+  --offline: #dc322f;
+  --unmonitored: #586e75;
+  --checking: #b58900;
+  --dot: rgba(147, 161, 161, 0.08);
+}
+
+:root[data-theme="highcontrast"] {
+  --bg: #000000;
+  --bg-elevated: #141414;
+  --bg-card: #1a1a1a;
+  --bg-card-hover: #262626;
+  --bg-panel: #0a0a0a;
+  --border: #6b6b6b;
+  --text: #ffffff;
+  --text-dim: #cccccc;
+  --text-faint: #999999;
+  --accent: #00d9ff;
+  --accent-dim: #007a99;
+  --online: #00ff00;
+  --offline: #ff0000;
+  --unmonitored: #808080;
+  --checking: #ffff00;
+  --dot: rgba(255, 255, 255, 0.12);
+}
+
 /* A couple of themes get one extra flourish beyond the token swap — a
    gradient on the primary call-to-action button — rather than a gradient
    forced into every card border, which would fight the app's flat
@@ -880,11 +944,35 @@ button, input, select {
   color: var(--text-faint);
 }
 
+/* flex-wrap unconditional (not scoped to the mobile breakpoint) on
+   purpose: .card-grid's columns are auto-fill/minmax(260px, 1fr), so a
+   card's actual width depends on how many columns happen to fit the
+   current window, not on viewport width directly — a plain desktop
+   window with room for 3+ columns can land cards just as narrow as a
+   phone's, at a width nowhere near the mobile media query. A service
+   with Service Control's extra buttons overflowed past the card's own
+   edge in exactly that situation, wrap-only-on-mobile notwithstanding.
+   Wrapping unconditionally has no effect where a row already fits, so
+   this covers every case without needing to duplicate it per breakpoint. */
 .card-quick-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: stretch;
   gap: 8px;
   margin-top: 16px;
+}
+
+/* Groups the Service Control buttons (start/stop/restart/logs) as one
+   flex item, so the row above wraps them together instead of splitting
+   the cluster wherever the line happens to run out of room. The left
+   divider reads as "these buttons belong together" whether the group
+   lands beside the primary actions or wraps to a row of its own. */
+.control-btn-group {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
 }
 
 .enter-btn {
@@ -1027,6 +1115,13 @@ button, input, select {
     radial-gradient(circle, var(--dot) 1px, transparent 1px) 0 0 / 26px 26px,
     var(--bg-panel);
   overflow: hidden;
+  /* How much edge clearance a node's own footprint needs so it doesn't
+     get clipped by the container's edge — renderServicesGraphView (in
+     dashboard.js) reads this to compute the circle's radius. A custom
+     property instead of a duplicated JS constant so the mobile override
+     below and the node's own shrunk size (also below) can't drift out of
+     sync with each other. */
+  --graph-node-margin: 70px;
 }
 
 #graphOverlay {
@@ -1206,6 +1301,8 @@ button, input, select {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
+  line-height: 1.3;
+  vertical-align: middle;
 }
 
 .file-table tr:last-child td { border-bottom: none; }
@@ -1220,7 +1317,13 @@ button, input, select {
 .file-table tr.file-dragging { opacity: 0.4; }
 .file-table tr.dir-row.drag-target { background: var(--accent-dim); outline: 2px solid var(--accent); outline-offset: -2px; }
 
-.file-name { display: flex; align-items: center; gap: 8px; }
+/* Plain text only (the icon is its own preceding <td>) — no flex/gap
+   needed, and flex sizing was actually harmful here: a flex container
+   computes its own height from the content's raw glyph metrics instead of
+   the normal line-height-based box every sibling cell uses, so this cell
+   came out ~2px shorter than the rest even with identical font-size and
+   line-height, breaking the border-bottom line's alignment across the
+   row (see the mobile row-height fix above this cell was part of). */
 
 .file-row-actions { display: flex; gap: 6px; justify-content: flex-end; }
 
@@ -1230,7 +1333,9 @@ button, input, select {
   border: none;
   color: var(--text-dim);
   cursor: pointer;
+  font-family: inherit;
   font-size: 0.85rem;
+  line-height: inherit;
   text-decoration: none;
 }
 
@@ -2254,6 +2359,46 @@ legend {
   box-shadow: 0 0 6px currentColor;
 }
 
+/* Only shown while the Custom swatch is the active theme. Exposes the 8
+   colors that actually carry meaning (backgrounds/cards/hover states,
+   text levels, and the accent-dim shade are all derived from these, the
+   same way the other 16 themes are hand-tuned variations of a handful of
+   real choices) rather than 16 raw inputs, which is what "small menu"
+   actually calls for. */
+.custom-theme-panel {
+  margin-top: 14px;
+  padding: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.custom-theme-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.custom-theme-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.custom-theme-field input[type="color"] {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 .groups-list {
   display: flex;
   flex-direction: column;
@@ -2366,6 +2511,34 @@ legend {
   border-top: 1px solid var(--border);
   line-height: 1.5;
 }
+
+.host-section-label {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-top: 4px;
+}
+
+.host-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+}
+
+.host-fact {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.8rem;
+}
+
+.host-fact span:first-child { color: var(--text-dim); }
+.host-fact span:last-child { color: var(--text); font-weight: 600; }
+
+.host-fact-online { color: var(--online) !important; }
+.host-fact-checking { color: var(--checking) !important; }
+.host-fact-offline { color: var(--offline) !important; }
 
 .discovery-controls {
   display: flex;
@@ -2575,7 +2748,17 @@ legend {
      and giving the row's own action buttons a denser size that fits a
      list row rather than the general touch-target default. */
   .service-row { flex-wrap: wrap; row-gap: 4px; }
-  .service-row .row-name { flex: 1; min-width: 0; max-width: none; }
+  /* min-width:0 (not a real floor) meant the browser could always
+     satisfy "fit everything on one line" by shrinking the name toward
+     nothing, so wrapping never actually triggered — a service with
+     Service Control's extra buttons (start/stop/restart/logs on top of
+     edit/wake) squeezed the title down to unreadable instead of pushing
+     its actions to their own line. A real floor lets flex-wrap do its
+     job: rows with few buttons still fit on one line unchanged, rows
+     with enough buttons to matter wrap the actions below once the name
+     hits this floor, same "drop to the next line" fix as row-meta above
+     rather than crushing a sibling. */
+  .service-row .row-name { flex: 1; min-width: 70px; max-width: none; }
   .service-row .row-meta { order: 10; flex-basis: 100%; }
   .service-row .row-uptime { display: none; }
   .service-row .row-actions .icon-btn { width: 32px; }
@@ -2636,6 +2819,26 @@ legend {
   .file-table th:nth-child(4),
   .file-table td:nth-child(4) { display: none; }
 
+  /* Automatic table layout let a long folder/file name OR a long size
+     string (e.g. "56.8 GB" in a narrow column) wrap onto a second line —
+     whichever row happened to wrap got taller than its neighbors, which
+     read as "uneven spacing between entries" even though every row uses
+     the same structure. Fixed column widths + one-line ellipsis truncation
+     (same pattern the dashboard list view already uses for long service
+     names) makes every row exactly one line tall, full stop. */
+  .file-table { table-layout: fixed; }
+  .file-table th:nth-child(1),
+  .file-table td:nth-child(1) { width: 32px; }
+  .file-table th:nth-child(3),
+  .file-table td:nth-child(3) { width: 64px; }
+  .file-table th:nth-child(5),
+  .file-table td:nth-child(5) { width: 78px; }
+  .file-table td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   /* Slightly larger touch targets for the small icon controls scattered
      across cards and the composer — 28-38px is comfortable with a mouse
      cursor but tight for a fingertip. */
@@ -2644,6 +2847,66 @@ legend {
   .pin-toggle { padding: 6px; font-size: 1.1rem; }
   .chat-message-delete,
   .delete-channel-btn { padding: 4px; }
+
+
+  /* Same missing-wrap gap in two more button rows: the Files toolbar's
+     Upload/Folder/New Folder/Recent group (own line already, per
+     .toolbar above, but was still wider than the viewport by itself),
+     and every grouped-button row in Settings (.inline-form covers the
+     password actions, session length, IP allowlist save, service
+     control save, and the Backup export/import row in one shared rule)
+     — all were pushing the page wider instead of wrapping. */
+  .file-actions { flex-wrap: wrap; }
+  .inline-form { flex-wrap: wrap; }
+
+  /* Info-tip bubbles anchor left:0 on their trigger button and grow up to
+     230px rightward — fine with a wide desktop modal, but every info-tip
+     button in this app actually sits somewhere near the horizontal middle
+     of its row (measured live: roughly 40-60% across a ~340px mobile
+     modal card, never near either edge), so growing purely rightward
+     (overflows past the card on the right) or purely leftward (tried
+     first — overflows past the card on the *left* instead, just moving
+     the same problem) both fail for a button positioned mid-row. Centering
+     the bubble on its button, capped narrow enough to fit either half,
+     is what actually matches where these buttons really are. */
+  .info-tip-bubble {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%) translateY(-4px);
+    max-width: 180px;
+  }
+  .info-tip:hover .info-tip-bubble,
+  .info-tip:focus-visible .info-tip-bubble,
+  .info-tip.tip-open .info-tip-bubble {
+    transform: translateX(-50%) translateY(0);
+  }
+
+  /* Graph view: the radius formula (renderServicesGraphView, dashboard.js)
+     already shrinks with the container's actual width, but the node
+     footprint below was a fixed size regardless of viewport — on a real
+     ~330px-wide graph with a dozen services, that worked out to adjacent
+     nodes' centers landing ~48px apart while each node was 88px wide, so
+     every neighboring pair visibly overlapped (confirmed by measuring the
+     actual rendered rects, not estimated). Shrinking the node and cutting
+     --graph-node-margin (which the same radius formula reads) gives
+     roughly 30% more usable radius on top of the smaller footprint —
+     comfortably enough for 12 nodes not to overlap, verified live. */
+  .services-graph { --graph-node-margin: 34px; }
+  .graph-node { width: 48px; gap: 2px; }
+  .graph-node-icon { width: 30px; height: 30px; font-size: 0.9rem; border-width: 2px; }
+  .graph-node-icon img { width: 17px; height: 17px; }
+  .graph-node-label { font-size: 0.58rem; max-width: 48px; }
+
+  /* Connection lines at 2px/55% opacity read fine against the larger card
+     grid but got lost against the graph's dotted background at phone
+     size — thicker and more opaque here only (#connectionsOverlay, the
+     card view's own hover-connections lines, is a separate element and
+     unaffected). CSS wins over the SVG presentation attributes dashboard.js
+     sets in JS, so no script change needed for this part. */
+  #graphOverlay line {
+    stroke-width: 3;
+    opacity: 0.8;
+  }
 }
 
 .login-wrap {

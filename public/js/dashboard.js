@@ -109,6 +109,10 @@ function serviceControlAvailable(service) {
   return !!(state.config.security.serviceControl.enabled && (type === 'script' || type === 'docker'));
 }
 
+// Wrapped in .control-btn-group so these render and wrap as one unit —
+// without it, flex-wrap breaks the row wherever it runs out of space,
+// which could leave e.g. Start on the first line and Stop/Restart/Logs
+// stranded on the next, splitting one control cluster in two.
 function controlButtonsMarkup(service, btnClass) {
   if (!serviceControlAvailable(service)) return '';
   const c = service.controller;
@@ -117,16 +121,20 @@ function controlButtonsMarkup(service, btnClass) {
   // button only appears if that specific command was actually filled in.
   if (c.type === 'docker') {
     return `
-      <button type="button" class="${btnClass} control-btn" data-action="start" title="Start">▶</button>
-      <button type="button" class="${btnClass} control-btn" data-action="stop" title="Stop">⏹</button>
-      <button type="button" class="${btnClass} control-btn" data-action="restart" title="Restart">⟲</button>
-      <button type="button" class="${btnClass} logs-btn" title="View logs">📜</button>
+      <span class="control-btn-group">
+        <button type="button" class="${btnClass} control-btn" data-action="start" title="Start">▶</button>
+        <button type="button" class="${btnClass} control-btn" data-action="stop" title="Stop">⏹</button>
+        <button type="button" class="${btnClass} control-btn" data-action="restart" title="Restart">⟲</button>
+        <button type="button" class="${btnClass} logs-btn" title="View logs">📜</button>
+      </span>
     `;
   }
   return `
-    ${c.startCmd ? `<button type="button" class="${btnClass} control-btn" data-action="start" title="Start">▶</button>` : ''}
-    ${c.stopCmd ? `<button type="button" class="${btnClass} control-btn" data-action="stop" title="Stop">⏹</button>` : ''}
-    ${c.restartCmd ? `<button type="button" class="${btnClass} control-btn" data-action="restart" title="Restart">⟲</button>` : ''}
+    <span class="control-btn-group">
+      ${c.startCmd ? `<button type="button" class="${btnClass} control-btn" data-action="start" title="Start">▶</button>` : ''}
+      ${c.stopCmd ? `<button type="button" class="${btnClass} control-btn" data-action="stop" title="Stop">⏹</button>` : ''}
+      ${c.restartCmd ? `<button type="button" class="${btnClass} control-btn" data-action="restart" title="Restart">⟲</button>` : ''}
+    </span>
   `;
 }
 
@@ -460,7 +468,13 @@ function renderServicesGraphView() {
   const rect = graphView.getBoundingClientRect();
   const cx = rect.width / 2;
   const cy = rect.height / 2;
-  const radius = Math.max(60, Math.min(cx, cy) - 70);
+  // Read from CSS (--graph-node-margin, .services-graph in style.css)
+  // rather than a hardcoded number here, so the mobile breakpoint's
+  // smaller node footprint and this margin can't quietly drift out of
+  // sync — a fixed JS constant paired with a fixed node size was exactly
+  // what caused nodes to overlap on mobile in the first place.
+  const nodeMargin = parseFloat(getComputedStyle(graphView).getPropertyValue('--graph-node-margin')) || 70;
+  const radius = Math.max(60, Math.min(cx, cy) - nodeMargin);
 
   services.forEach((service, i) => {
     const angle = (i / services.length) * 2 * Math.PI - Math.PI / 2;

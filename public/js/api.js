@@ -105,13 +105,21 @@ export const api = {
 
   listFiles: (relPath) => request('GET', `/api/files?path=${encodeURIComponent(relPath || '')}`),
   downloadUrl: (relPath) => `/api/files/download?path=${encodeURIComponent(relPath)}`,
+  downloadZipUrl: (relPath) => `/api/files/download-zip?path=${encodeURIComponent(relPath)}`,
   mkdir: (relPath) => request('POST', '/api/files/mkdir', { path: relPath }),
   deleteFile: (relPath) => request('DELETE', `/api/files?path=${encodeURIComponent(relPath)}`),
   moveFile: (from, to) => request('POST', '/api/files/move', { from, to }),
   getRecentUploads: () => request('GET', '/api/files/recent'),
   searchFiles: (q) => request('GET', `/api/files/search?q=${encodeURIComponent(q)}`),
-  uploadFile: async (dirPath, file) => {
+  // relPath (a folder-upload's File.webkitRelativePath, e.g.
+  // "Vacation2026/beach.jpg") must be appended to the form *before* the
+  // file — multer only has a text field in req.body by the time its
+  // per-file callbacks run if it was parsed first, since a multipart body
+  // is read in stream order. Omitted entirely for a plain file upload, so
+  // the server falls back to its original flat-filename behavior.
+  uploadFile: async (dirPath, file, relPath) => {
     const form = new FormData();
+    if (relPath) form.append('relPath', relPath);
     form.append('file', file);
     const res = await fetch(`/api/files/upload?path=${encodeURIComponent(dirPath || '')}`, {
       method: 'POST',

@@ -57,15 +57,65 @@ export function toast(message, isError = false) {
 // never fires) plus outside-click/Escape to close one left open. Delegated
 // on document since these buttons live inside modals that get shown/hidden
 // rather than re-created, so binding once at load is enough.
+//
+// The bubble's default position (CSS: centered under its button) works
+// for any button that sits away from the modal's edges — true of every
+// Settings info-tip, measured directly. The Add/Edit Service modal has a
+// couple that sit close to the right edge instead, where a centered
+// bubble still runs past it. Rather than hand-tune per-modal CSS again,
+// this measures the bubble against its modal's actual bounds each time it
+// opens and nudges it back in if it would overflow, so any button
+// position in any modal stays correct without needing to know in advance
+// where that button happens to be.
+function positionInfoTipBubble(tip) {
+  const bubble = tip.querySelector('.info-tip-bubble');
+  if (!bubble) return;
+  // The stylesheet transitions both opacity and transform on open (a
+  // small slide-down reveal). Measuring position synchronously while that
+  // transition is live reads a mid-animation value, not the settled one —
+  // this showed up as the correction being computed against the wrong
+  // rect and then itself getting animated from a stale starting point.
+  // Scoping transitionProperty to just opacity for the correction (then
+  // restoring it after a forced reflow) keeps the reveal fade but makes
+  // the position land instantly and correctly.
+  bubble.style.transitionProperty = 'opacity';
+  bubble.style.transform = 'translateX(-50%)';
+  const bounds = (tip.closest('.modal-card') || document.body).getBoundingClientRect();
+  const rect = bubble.getBoundingClientRect();
+  const margin = 8;
+  let shift = 0;
+  if (rect.left < bounds.left + margin) shift = bounds.left + margin - rect.left;
+  else if (rect.right > bounds.right - margin) shift = bounds.right - margin - rect.right;
+  if (shift) bubble.style.transform = `translateX(calc(-50% + ${shift}px))`;
+  void bubble.offsetHeight;
+  bubble.style.transitionProperty = '';
+}
+
 document.addEventListener('click', (e) => {
   const tip = e.target.closest('.info-tip');
   if (tip) {
     const wasOpen = tip.classList.contains('tip-open');
     document.querySelectorAll('.info-tip.tip-open').forEach((b) => b.classList.remove('tip-open'));
-    if (!wasOpen) tip.classList.add('tip-open');
+    if (!wasOpen) {
+      tip.classList.add('tip-open');
+      positionInfoTipBubble(tip);
+    }
     return;
   }
   document.querySelectorAll('.info-tip.tip-open').forEach((b) => b.classList.remove('tip-open'));
+});
+
+// mouseenter doesn't bubble, so delegating it needs the capture phase —
+// this is what actually covers desktop mouse users, who trigger the
+// bubble via :hover in CSS and never touch the click handler above at all.
+document.addEventListener('mouseenter', (e) => {
+  const tip = e.target.closest?.('.info-tip');
+  if (tip) positionInfoTipBubble(tip);
+}, true);
+
+document.addEventListener('focusin', (e) => {
+  const tip = e.target.closest('.info-tip');
+  if (tip) positionInfoTipBubble(tip);
 });
 
 document.addEventListener('keydown', (e) => {

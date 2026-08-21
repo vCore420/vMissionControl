@@ -7,11 +7,22 @@
   <link rel="stylesheet" href="/css/style.css" />
   <script>
     // Applied before first paint so switching themes doesn't flash the
-    // default palette for a frame on every reload.
+    // default palette for a frame on every reload. The custom theme's
+    // colors are pre-computed (backgrounds/text levels/accent-dim derived
+    // from the 8 colors actually picked) and stored ready-to-apply in
+    // mc:customTokens by settings.js, so this only ever needs to loop and
+    // set properties — no color math has to be duplicated into this
+    // blocking script just to avoid a flash of the wrong palette.
     (function () {
       try {
         var saved = localStorage.getItem('mc:theme');
         if (saved) document.documentElement.setAttribute('data-theme', saved);
+        if (saved === 'custom') {
+          var tokens = JSON.parse(localStorage.getItem('mc:customTokens') || 'null');
+          if (tokens) {
+            for (var k in tokens) document.documentElement.style.setProperty('--' + k, tokens[k]);
+          }
+        }
       } catch (e) {}
     })();
   </script>
@@ -89,8 +100,10 @@
         <button type="button" data-layout="tree" title="Folder tree">🌳</button>
       </div>
       <div class="file-actions">
-        <button id="uploadBtn" class="btn">⬆ Upload</button>
+        <button id="uploadBtn" class="btn" title="Upload files">⬆ Upload</button>
         <input type="file" id="uploadInput" hidden multiple />
+        <button id="uploadFolderBtn" class="btn ghost" title="Upload a whole folder, contents included">⬆📁 Folder</button>
+        <input type="file" id="uploadFolderInput" hidden multiple webkitdirectory />
         <button id="mkdirBtn" class="btn ghost">＋ New Folder</button>
         <button id="openRecentBtn" class="btn ghost" title="Recently added files">🕓 Recent</button>
       </div>
@@ -239,6 +252,10 @@
         <div class="settings-section">
           <h3>Appearance</h3>
           <div id="themeGrid" class="theme-grid"></div>
+          <div id="customThemePanel" class="custom-theme-panel hidden">
+            <p class="settings-hint">Pick your own colors — changes apply and save immediately, and stick around until you edit them again.</p>
+            <div id="customThemeFields" class="custom-theme-fields"></div>
+          </div>
         </div>
       </div>
 

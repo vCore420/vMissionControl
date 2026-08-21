@@ -1,7 +1,7 @@
 import { api } from './api.js';
 import {
   state, el, toast, escapeHtml, escapeAttr, loadAll, timeAgo,
-  healthBarClass, formatGB, formatUptime,
+  healthBarClass, formatGB, formatSize, formatUptime,
 } from './core.js';
 import { renderConnectionOverlay } from './dashboard.js';
 
@@ -30,19 +30,162 @@ const THEMES = [
   { id: 'sunset', name: 'Sunset', bg: '#1a0f1f', accent: '#ff7e5f' },
   { id: 'vaporwave', name: 'Vaporwave', bg: '#100a24', accent: '#ff71ce' },
   { id: 'mono', name: 'Mono', bg: '#121212', accent: '#ffffff' },
+  { id: 'dracula', name: 'Dracula', bg: '#282a36', accent: '#bd93f9' },
+  { id: 'solarized', name: 'Solarized', bg: '#002b36', accent: '#268bd2' },
+  { id: 'highcontrast', name: 'High Contrast', bg: '#000000', accent: '#00d9ff' },
 ];
+
+// ---------- Custom theme ----------
+// Every preset theme above is really just a hand-tuned set of the same 16
+// tokens (see style.css's [data-theme] blocks) — backgrounds/cards/hover
+// states, three text levels, accent + its dim shade, and four status
+// colors. Exposing all 16 as raw pickers would work but isn't the "small
+// menu" this was asked for; exposing the 8 that actually carry distinct
+// meaning and deriving the rest (lighten/darken relationships mirrored
+// from how the presets already relate to each other) gets a full-coverage
+// custom theme out of a compact form.
+const CUSTOM_THEME_FIELDS = [
+  { key: 'bg', label: 'Background' },
+  { key: 'text', label: 'Text' },
+  { key: 'accent', label: 'Accent' },
+  { key: 'border', label: 'Border' },
+  { key: 'online', label: 'Online' },
+  { key: 'offline', label: 'Offline' },
+  { key: 'unmonitored', label: 'Unmonitored' },
+  { key: 'checking', label: 'Checking' },
+];
+
+const DEFAULT_CUSTOM_COLORS = {
+  bg: '#0d0f14', text: '#e8eaf0', accent: '#7c5cff', border: '#262b3a',
+  online: '#4ade80', offline: '#f87171', unmonitored: '#6b7280', checking: '#fbbf24',
+};
+
+// The full token set a [data-theme] CSS block declares — used to clear
+// any leftover inline overrides when switching away from Custom, since an
+// inline style always beats a stylesheet rule regardless of which preset
+// is now selected.
+const THEME_TOKEN_KEYS = [
+  'bg', 'bg-panel', 'bg-elevated', 'bg-card', 'bg-card-hover', 'border',
+  'text', 'text-dim', 'text-faint', 'accent', 'accent-dim',
+  'online', 'offline', 'unmonitored', 'checking', 'dot',
+];
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function rgbToHex(rgb) {
+  return '#' + rgb.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
+}
+
+// ratio 0 = pure a, 1 = pure b
+function mixHex(hexA, hexB, ratio) {
+  const a = hexToRgb(hexA);
+  const b = hexToRgb(hexB);
+  return rgbToHex(a.map((v, i) => v + (b[i] - v) * ratio));
+}
+
+function hexToRgba(hex, alpha) {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// Mirrors how the hand-tuned presets relate their own surfaces to each
+// other (checked against Dark's actual values) — panel/elevated/card/hover
+// step progressively further from bg *toward text*, which lightens them
+// in a dark theme and darkens them in a light one without needing to know
+// which case it is. text-dim/faint and accent-dim step the other way,
+// fading toward bg. Border and the four status colors are picked directly
+// rather than derived — they carry real semantic/legibility weight a
+// formula shouldn't be guessing at.
+function deriveCustomTokens(c) {
+  return {
+    bg: c.bg,
+    'bg-panel': mixHex(c.bg, c.text, 0.06),
+    'bg-elevated': mixHex(c.bg, c.text, 0.10),
+    'bg-card': mixHex(c.bg, c.text, 0.13),
+    'bg-card-hover': mixHex(c.bg, c.text, 0.18),
+    border: c.border,
+    text: c.text,
+    'text-dim': mixHex(c.text, c.bg, 0.38),
+    'text-faint': mixHex(c.text, c.bg, 0.62),
+    accent: c.accent,
+    'accent-dim': mixHex(c.accent, c.bg, 0.42),
+    online: c.online,
+    offline: c.offline,
+    unmonitored: c.unmonitored,
+    checking: c.checking,
+    dot: hexToRgba(c.text, 0.09),
+  };
+}
+
+function applyCustomTokens(tokens) {
+  for (const [key, value] of Object.entries(tokens)) {
+    document.documentElement.style.setProperty(`--${key}`, value);
+  }
+}
+
+function loadCustomColors() {
+  try {
+    return JSON.parse(localStorage.getItem('mc:customColors')) || DEFAULT_CUSTOM_COLORS;
+  } catch {
+    return DEFAULT_CUSTOM_COLORS;
+  }
+}
+
+// Saves both the 8 raw picks (so the form can be repopulated next time
+// it's opened) and the fully-derived 16-token set (so the pre-paint
+// script in index.html/login.html never has to duplicate the color math
+// above — it only ever loops over already-computed values).
+function saveAndApplyCustomTheme(colors) {
+  const tokens = deriveCustomTokens(colors);
+  localStorage.setItem('mc:customColors', JSON.stringify(colors));
+  localStorage.setItem('mc:customTokens', JSON.stringify(tokens));
+  applyCustomTokens(tokens);
+}
+
+function renderCustomThemePanel() {
+  const panel = el('customThemePanel');
+  const isCustom = state.theme === 'custom';
+  panel.classList.toggle('hidden', !isCustom);
+  if (!isCustom) return;
+
+  const colors = loadCustomColors();
+  el('customThemeFields').innerHTML = CUSTOM_THEME_FIELDS.map((f) => `
+    <label class="custom-theme-field">
+      <input type="color" data-color-key="${f.key}" value="${colors[f.key]}" />
+      ${f.label}
+    </label>
+  `).join('');
+  el('customThemeFields').querySelectorAll('input[type="color"]').forEach((input) => {
+    input.addEventListener('input', () => {
+      const next = { ...loadCustomColors(), [input.dataset.colorKey]: input.value };
+      saveAndApplyCustomTheme(next);
+      renderThemeGrid(); // keeps the Custom swatch's own preview live
+    });
+  });
+}
 
 function applyTheme(themeId) {
   document.documentElement.setAttribute('data-theme', themeId);
   localStorage.setItem('mc:theme', themeId);
   state.theme = themeId;
+  if (themeId === 'custom') {
+    saveAndApplyCustomTheme(loadCustomColors());
+  } else {
+    for (const key of THEME_TOKEN_KEYS) document.documentElement.style.removeProperty(`--${key}`);
+  }
   renderThemeGrid();
+  renderCustomThemePanel();
   if (state.connectionsVisible) requestAnimationFrame(renderConnectionOverlay);
 }
 
 function renderThemeGrid() {
   const wrap = el('themeGrid');
-  wrap.innerHTML = THEMES.map((t) => `
+  const customColors = loadCustomColors();
+  const swatches = [...THEMES, { id: 'custom', name: 'Custom', bg: customColors.bg, accent: customColors.accent }];
+  wrap.innerHTML = swatches.map((t) => `
     <button type="button" class="theme-swatch ${state.theme === t.id ? 'active' : ''}" data-theme-id="${t.id}">
       <span class="theme-swatch-preview" style="background:${t.bg}">
         <span class="theme-swatch-dot" style="background:${t.accent};color:${t.accent}"></span>
@@ -56,6 +199,7 @@ function renderThemeGrid() {
 }
 
 renderThemeGrid();
+renderCustomThemePanel();
 
 // ---------- Settings modal ----------
 
@@ -148,6 +292,13 @@ function renderHostHealth(targetId, h) {
   const memPercent = Math.round((h.memory.used / h.memory.total) * 100);
   const diskPercent = h.disk ? Math.round((h.disk.used / h.disk.total) * 100) : null;
 
+  const mc = h.mc || {};
+  // Not a status this app actively monitors elsewhere, so it gets its own
+  // rough thresholds rather than reusing healthBarClass's — a loop that's
+  // 200ms+ behind is worth a second look, a full second behind is worth
+  // treating like an active problem.
+  const lagClass = mc.eventLoopLagMs >= 1000 ? 'offline' : mc.eventLoopLagMs >= 200 ? 'checking' : 'online';
+
   wrap.innerHTML = `
     <div class="host-stat">
       <div class="host-stat-label">CPU <span>${h.cpuPercent}%</span></div>
@@ -164,6 +315,15 @@ function renderHostHealth(targetId, h) {
     </div>` : ''}
     <div class="host-meta">
       ${escapeHtml(h.hostname)} · ${escapeHtml(h.platform)} (${escapeHtml(h.arch)}) · ${escapeHtml(h.cpuModel)} · ${h.cpuCount} cores · up ${formatUptime(h.uptimeSeconds)}
+    </div>
+    <div class="host-section-label">Mission Control</div>
+    <div class="host-facts">
+      <div class="host-fact"><span>Process uptime</span><span>${formatUptime(mc.uptimeSeconds ?? 0)}</span></div>
+      <div class="host-fact"><span>Memory footprint</span><span>${formatSize(mc.memoryRss ?? 0)}</span></div>
+      <div class="host-fact"><span>Connected devices</span><span>${mc.wsClients ?? '—'}</span></div>
+      <div class="host-fact"><span>Active sessions</span><span>${mc.sessions ?? '—'}</span></div>
+      <div class="host-fact"><span>Event loop lag</span><span class="host-fact-${lagClass}">${mc.eventLoopLagMs ?? 0}ms</span></div>
+      <div class="host-fact"><span>Last health sweep</span><span>${mc.lastHealthSweepAt ? timeAgo(mc.lastHealthSweepAt) : 'not yet run'}</span></div>
     </div>
   `;
 }

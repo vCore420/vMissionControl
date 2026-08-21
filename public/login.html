@@ -6,10 +6,18 @@
   <title>Mission Control — Sign in</title>
   <link rel="stylesheet" href="/css/style.css" />
   <script>
+    // See index.html for why this only loops and applies pre-computed
+    // tokens rather than re-deriving the custom theme's colors here too.
     (function () {
       try {
         var saved = localStorage.getItem('mc:theme');
         if (saved) document.documentElement.setAttribute('data-theme', saved);
+        if (saved === 'custom') {
+          var tokens = JSON.parse(localStorage.getItem('mc:customTokens') || 'null');
+          if (tokens) {
+            for (var k in tokens) document.documentElement.style.setProperty('--' + k, tokens[k]);
+          }
+        }
       } catch (e) {}
     })();
   </script>

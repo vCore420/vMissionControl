@@ -15,6 +15,18 @@ import { clientIp } from './net.js';
 // automatically for a same-origin connection — meaning this can enforce
 // the same session check as everything else, not sit behind the REST API
 // as an unauthenticated back door into the same live data.
+// Without a heartbeat, a connection that dies uncleanly (a phone locking,
+// a wifi↔cellular handoff, a laptop lid closing) can sit in wss.clients
+// forever still reporting readyState OPEN — nothing ever tells this
+// server the other end is gone. broadcast() below then keeps calling
+// .send() on it, sweep after sweep, for as long as the process runs.
+// Over days of real device churn those zombies accumulate. This is the
+// standard ws-library fix: ping every client on an interval, and if one
+// didn't answer the *previous* ping (isAlive still false), it's dead —
+// terminate() it, which also fires its own 'close' handler below so
+// devices.js's connected-count stays accurate.
+const HEARTBEAT_INTERVAL_MS = 30000;
+
 let wss = null;
 
 export function attachWebSocketServer(httpServer) {
@@ -51,9 +63,23 @@ export function attachWebSocketServer(httpServer) {
     const ip = clientIp(req);
     recordDevice(ip, req.headers['user-agent']);
     markWsConnected(ip);
+    socket.isAlive = true;
+    socket.on('pong', () => { socket.isAlive = true; });
     socket.on('close', () => markWsDisconnected(ip));
     socket.on('error', () => {}); // a malformed frame shouldn't take the process down
   });
+
+  const heartbeat = setInterval(() => {
+    for (const socket of wss.clients) {
+      if (socket.isAlive === false) {
+        socket.terminate();
+        continue;
+      }
+      socket.isAlive = false;
+      socket.ping();
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+  wss.on('close', () => clearInterval(heartbeat));
 
   appEvents.on('status', (services) => broadcast({ type: 'status', services }));
   appEvents.on('config', (config) => broadcast({ type: 'config', config: sanitizeConfig(config) }));
@@ -63,6 +89,13 @@ export function attachWebSocketServer(httpServer) {
   );
 
   return wss;
+}
+
+// Read by host.js for the Host Health panel — a live count of how many
+// devices actually have an open real-time connection right now, as
+// distinct from devices.js's "seen at some point" tracking.
+export function getConnectedClientCount() {
+  return wss ? wss.clients.size : 0;
 }
 
 function broadcast(message) {

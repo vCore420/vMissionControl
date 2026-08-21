@@ -1,7 +1,6 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import os from 'node:os';
 
 import { loadConfig, sanitizeConfig } from './config.js';
 import { startHealthChecker, stopHealthChecker, getStatusSnapshot } from './healthChecker.js';
@@ -20,7 +19,7 @@ import { authRouter } from './routes/auth.js';
 import { requireAuth, requireCsrfHeader } from './auth.js';
 import { requireIpAllowlist } from './ipAllowlist.js';
 import { recordDevice } from './devices.js';
-import { clientIp } from './net.js';
+import { clientIp, lanAddresses } from './net.js';
 import { startHostHealthSampler, stopHostHealthSampler, getHostHealthSnapshot } from './host.js';
 import { pruneOldLogs, logActivity } from './activityLog.js';
 
@@ -78,17 +77,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'internal server error' });
 });
 
-function lanAddresses() {
-  const nets = os.networkInterfaces();
-  const addrs = [];
-  for (const iface of Object.values(nets)) {
-    for (const net of iface || []) {
-      if (net.family === 'IPv4' && !net.internal) addrs.push(net.address);
-    }
-  }
-  return addrs;
-}
-
 const config = await loadConfig();
 const PORT = process.env.PORT ? Number(process.env.PORT) : config.settings.port;
 
@@ -103,6 +91,20 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`  → http://${addr}:${PORT}`);
   }
   logActivity('system', 'Mission Control started');
+});
+
+// Without this, a second instance started on an already-occupied port dies
+// with a raw EADDRINUSE stack trace — technically correct, not exactly
+// pointing anyone at what to do about it. An orphaned instance left
+// running after a window was closed the wrong way (see stop.bat) is
+// exactly the case this is for.
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\nPort ${PORT} is already in use — Mission Control (or something else) is already running.`);
+    console.error(`Run stop.bat first, or check what's using this port before starting another instance.\n`);
+    process.exit(1);
+  }
+  throw err;
 });
 
 const wss = attachWebSocketServer(server);

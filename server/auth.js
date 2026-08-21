@@ -72,6 +72,15 @@ export function destroySession(token) {
   sessions.delete(token);
 }
 
+// Read by host.js for the Host Health panel. Expired-but-not-yet-touched
+// sessions are only pruned lazily (the next time that exact token is
+// checked, in touchSession above), so this can run slightly high rather
+// than reflect the true live count — fine for a rough diagnostic, not
+// worth a sweep of its own just to keep this number exact.
+export function getActiveSessionCount() {
+  return sessions.size;
+}
+
 // Sliding expiry: any authenticated request pushes the session's expiry
 // back out, so a session used regularly never logs you out, but one
 // abandoned for longer than the configured session length quietly stops

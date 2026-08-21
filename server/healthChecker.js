@@ -15,6 +15,7 @@ import { checkTailscaleStatus } from './tailscale.js';
 const statusCache = new Map();
 const historyCache = new Map(); // serviceId -> Array<{status: 'online'|'offline', t: number}>
 let timer = null;
+let lastSweepAt = null; // read by host.js — a sweep loop that's silently stopped ticking is exactly the kind of thing Host Health should be able to surface
 
 // Separate from alerts.js's own transition tracker (which only runs when a
 // webhook is configured) — this logs every online<->offline flip
@@ -171,6 +172,11 @@ async function runSweep(getConfig) {
   logTransitions(snapshot, config.services);
   checkTransitions(snapshot, config);
   appEvents.emit('status', snapshot);
+  lastSweepAt = new Date().toISOString();
+}
+
+export function getLastSweepAt() {
+  return lastSweepAt;
 }
 
 export function startHealthChecker(getConfig) {

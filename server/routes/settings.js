@@ -79,8 +79,12 @@ settingsRouter.put('/', async (req, res) => {
         subnets,
       },
     };
+    // 'security', not 'settings' — this and service control below are the
+    // two config changes that actually affect the app's threat surface,
+    // which is also what makes them worth a webhook ping (see alerts.js's
+    // curated activity relay) unlike a routine settings tweak.
     logActivity(
-      'settings',
+      'security',
       `Updated IP allowlist (${config.security.ipAllowlist.enabled ? 'on' : 'off'}, ${subnets.length} range${subnets.length === 1 ? '' : 's'})`,
       ip
     );
@@ -92,7 +96,7 @@ settingsRouter.put('/', async (req, res) => {
       return res.status(400).json({ error: 'enable password protection before turning on service control' });
     }
     config.security = { ...config.security, serviceControl: { enabled: wantsEnabled } };
-    logActivity('settings', `Service control ${wantsEnabled ? 'enabled' : 'disabled'}`, ip);
+    logActivity('security', `Service control ${wantsEnabled ? 'enabled' : 'disabled'}`, ip);
   }
 
   await saveConfig(config);

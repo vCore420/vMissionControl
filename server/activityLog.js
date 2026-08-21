@@ -2,16 +2,23 @@
 // did it — every add/change/remove across services, groups, connections,
 // chat channels, settings, and config transfers; every service going
 // online/offline; every new device seen; every auth event (logins,
-// failures, rate-limit hits); every shared-folder file change; every
+// failures, rate-limit hits); every security-relevant setting change (IP
+// allowlist, service control); every shared-folder file change; every
 // discovery scan. Printed to the console as it happens and appended to a
 // dated file under server/data/logs/ so it survives a restart. This is
 // separate from devices.js (a live "who's connected" view) and from the
 // health/chat/status caches (deliberately ephemeral) — this is the one
 // thing in the app meant to accumulate as a history.
+//
+// A curated slice of this stream also goes out over the external-alerts
+// webhook (see alerts.js's alertActivity, called below) — new devices and
+// security changes are exactly the kind of thing worth a phone
+// notification, unlike most of what else flows through here.
 
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { alertActivity } from './alerts.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = path.join(__dirname, 'data', 'logs');
@@ -29,7 +36,11 @@ function formatLine(category, message, ip) {
 
 // Fire-and-forget on purpose — logging must never slow down or fail the
 // action it's describing. The console line is synchronous and always
-// happens; the file write is best-effort.
+// happens; the file write is best-effort. alertActivity is the same
+// fire-and-forget shape — it's a no-op instantly for anything outside its
+// own curated category/message allowlist (see alerts.js), so every one of
+// the many call sites elsewhere in the app gets webhook-relay eligibility
+// for free instead of needing to remember to wire it in individually.
 export function logActivity(category, message, ip = null) {
   const line = formatLine(category, message, ip);
   console.log(line);
@@ -37,6 +48,7 @@ export function logActivity(category, message, ip = null) {
     .mkdir(LOG_DIR, { recursive: true })
     .then(() => fsp.appendFile(logFilePath(new Date()), line + '\n', 'utf-8'))
     .catch((err) => console.error('[activityLog] failed to write log file:', err.message));
+  alertActivity(category, message, ip).catch(() => {});
 }
 
 // Runs once at startup — a personal LAN dashboard's log folder shouldn't

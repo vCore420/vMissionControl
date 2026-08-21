@@ -15,6 +15,7 @@ import { devicesRouter } from './routes/devices.js';
 import { discoveryRouter } from './routes/discovery.js';
 import { dockerRouter } from './routes/docker.js';
 import { configTransferRouter } from './routes/configTransfer.js';
+import { timesheetRouter } from './routes/timesheet.js';
 import { authRouter } from './routes/auth.js';
 import { requireAuth, requireCsrfHeader } from './auth.js';
 import { requireIpAllowlist } from './ipAllowlist.js';
@@ -69,6 +70,7 @@ app.use('/api/devices', devicesRouter);
 app.use('/api/discovery', discoveryRouter);
 app.use('/api/docker', dockerRouter);
 app.use('/api/config', configTransferRouter);
+app.use('/api/timesheet', timesheetRouter);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

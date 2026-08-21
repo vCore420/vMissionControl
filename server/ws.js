@@ -87,6 +87,12 @@ export function attachWebSocketServer(httpServer) {
   appEvents.on('chat:messageDeleted', ({ channelId, messageId }) =>
     broadcast({ type: 'chatMessageDeleted', channelId, messageId })
   );
+  // Only the profile + the live period, not the whole history — a second
+  // open device needs to know what just changed, not get the full
+  // multi-period archive re-sent on every keystroke-debounced save.
+  appEvents.on('timesheet:update', (data) =>
+    broadcast({ type: 'timesheet', profile: data.profile, period: data.periods[data.currentPeriodStart] })
+  );
 
   return wss;
 }

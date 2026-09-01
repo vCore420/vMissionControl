@@ -12,6 +12,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appEvents } from './events.js';
+import { writeJsonAtomic } from './jsonStore.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_PATH = path.join(__dirname, 'data', 'timesheet.json');
@@ -77,8 +78,7 @@ async function readFromDisk() {
 }
 
 async function write(data) {
-  await fs.mkdir(path.dirname(DATA_PATH), { recursive: true });
-  writeQueue = writeQueue.then(() => fs.writeFile(DATA_PATH, JSON.stringify(data, null, 2), 'utf-8'));
+  writeQueue = writeQueue.then(() => writeJsonAtomic(DATA_PATH, data));
   await writeQueue;
 }
 

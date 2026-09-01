@@ -98,6 +98,28 @@ function touchSession(token, maxAgeMs) {
   return true;
 }
 
+// Read-only "is this token a live session?" check, used by GET
+// /api/auth/status. Deliberately does NOT slide the expiry the way
+// touchSession does — the login page polls this before the user has done
+// anything that should count as activity, and a status probe keeping a
+// session alive would be a surprising side effect. Matches requireAuth's
+// verdict so the two auth checks can't disagree: before this existed,
+// /status trusted mere cookie *presence*, so a stale cookie left over
+// after a server restart (in-memory `sessions` wiped, cookie still in the
+// browser) made /status report "authenticated" while requireAuth kept
+// redirecting to /login.html — an infinite bounce between / and
+// /login.html that no device could log in through.
+export function isSessionValid(token, maxAgeMs) {
+  if (!token) return false;
+  const session = sessions.get(token);
+  if (!session) return false;
+  if (Date.now() - session.lastSeen > maxAgeMs) {
+    sessions.delete(token);
+    return false;
+  }
+  return true;
+}
+
 export function isRateLimited(ip) {
   const record = failedAttempts.get(ip);
   if (!record) return false;

@@ -180,3 +180,15 @@ export async function sendTestAlert(config) {
   if (!config.alerts?.webhookUrl) throw new Error('no webhook URL saved');
   await postWebhook(config.alerts.webhookUrl, buildTestPayload(config.alerts.format));
 }
+
+// A free-text message through the same webhook — for the assistant's
+// send_alert action ("@cyn tell everyone the server's going down"). Doesn't
+// require config.alerts.enabled (that switch only governs the automatic
+// status/activity relay); a saved URL is enough for an on-purpose send.
+export async function sendCustomAlert(config, text) {
+  if (!config.alerts?.webhookUrl) throw new Error('no alert webhook URL is configured');
+  const format = config.alerts.format;
+  const body =
+    format === 'discord' ? { content: text } : format === 'slack' ? { text } : { event: 'message', message: text, timestamp: new Date().toISOString() };
+  await postWebhook(config.alerts.webhookUrl, body);
+}

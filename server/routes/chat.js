@@ -62,6 +62,36 @@ chatRouter.put('/channels/reorder', async (req, res) => {
   res.json({ ok: true });
 });
 
+// Rename a channel and/or set its per-channel assistant persona. Registered
+// after /channels/reorder so that word isn't captured as an :id. Persona
+// fields are all optional — an empty string clears that one back to the
+// global default (Settings -> Ollama); the trigger word stays global.
+chatRouter.put('/channels/:id', async (req, res) => {
+  const config = await loadConfig();
+  const channel = config.chatChannels.find((c) => c.id === req.params.id);
+  if (!channel) return res.status(404).json({ error: 'channel not found' });
+
+  const body = req.body || {};
+  if (typeof body.name === 'string') {
+    const name = body.name.trim();
+    if (!name) return res.status(400).json({ error: 'a channel name cannot be empty' });
+    channel.name = name.slice(0, 40);
+  }
+  if (body.ollama && typeof body.ollama === 'object') {
+    const o = body.ollama;
+    const persona = {};
+    if (typeof o.botName === 'string' && o.botName.trim()) persona.botName = o.botName.trim().slice(0, 40);
+    if (typeof o.botEmoji === 'string' && o.botEmoji.trim()) persona.botEmoji = o.botEmoji.trim().slice(0, 8);
+    if (typeof o.systemPrompt === 'string' && o.systemPrompt.trim()) persona.systemPrompt = o.systemPrompt.slice(0, 8000);
+    if (Object.keys(persona).length) channel.ollama = persona;
+    else delete channel.ollama;
+  }
+
+  await saveConfig(config);
+  logActivity('chat', `Updated channel "${channel.name}"`, clientIp(req));
+  res.json(channel);
+});
+
 chatRouter.delete('/channels/:id', async (req, res) => {
   const config = await loadConfig();
   if (config.chatChannels.length <= 1) {
@@ -119,6 +149,7 @@ chatRouter.post('/channels/:id/messages', upload.single('file'), async (req, res
   }
 
   const author = (req.body.author || 'Anonymous').trim().slice(0, 40);
+  const deviceId = (req.get('X-Mc-Device') || req.body.deviceId || '').slice(0, 64) || undefined;
   const attachment = req.file
     ? {
         filename: req.file.filename,
@@ -128,7 +159,7 @@ chatRouter.post('/channels/:id/messages', upload.single('file'), async (req, res
       }
     : null;
 
-  const message = addMessage(req.params.id, { author, text, attachment });
+  const message = addMessage(req.params.id, { author, text, deviceId, attachment });
   res.status(201).json(message);
 });
 

@@ -11,6 +11,7 @@ import { appEvents } from './events.js';
 import { checkTransitions, forgetService as forgetAlertService } from './alerts.js';
 import { logActivity } from './activityLog.js';
 import { checkTailscaleStatus } from './tailscale.js';
+import { getGameStatus } from './gameServers.js';
 
 const statusCache = new Map();
 const historyCache = new Map(); // serviceId -> Array<{status: 'online'|'offline', t: number}>
@@ -104,6 +105,37 @@ function markUnmonitored(service) {
 }
 
 async function checkOne(service, timeoutMs) {
+  // A game server (creative roadmap Phase 5) is checked over its own
+  // protocol (RCON for Minecraft), not an HTTP ping — its game port isn't a
+  // web server. The player count rides the `detail` field, same mechanism as
+  // the Tailscale check below. This runs whether or not `healthCheck` is on:
+  // if a service has a `game` config, that IS how it's monitored.
+  if (service.game?.kind) {
+    const started = performance.now();
+    let status = 'offline';
+    let detail = null;
+    let error = null;
+    try {
+      const r = await getGameStatus(service.game); // lightweight — no full player pull
+      status = 'online';
+      const n = r.count ?? 0;
+      detail = `${n}${r.max != null ? `/${r.max}` : ''} player${n === 1 ? '' : 's'}`;
+    } catch (err) {
+      error = err.message;
+    }
+    statusCache.set(service.id, {
+      id: service.id,
+      status,
+      httpStatus: null,
+      latencyMs: Math.round(performance.now() - started),
+      lastChecked: new Date().toISOString(),
+      error,
+      detail,
+    });
+    recordHistory(service.id, status);
+    return;
+  }
+
   if (!service.healthCheck) {
     markUnmonitored(service);
     return;

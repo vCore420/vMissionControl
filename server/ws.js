@@ -2,7 +2,7 @@ import { WebSocketServer } from 'ws';
 import { appEvents } from './events.js';
 import { recordDevice, markWsConnected, markWsDisconnected } from './devices.js';
 import { loadConfig, sanitizeConfig } from './config.js';
-import { parseCookies, SESSION_COOKIE } from './auth.js';
+import { parseCookies, SESSION_COOKIE, isSessionValid, sessionMaxAgeMs } from './auth.js';
 import { isIpAllowed } from './ipAllowlist.js';
 import { clientIp } from './net.js';
 
@@ -12,9 +12,9 @@ import { clientIp } from './net.js';
 // reach this too, matching the app's trusted-LAN threat model. When a
 // password *is* set, this needs its own gate: a WebSocket upgrade is a
 // normal HTTP request first, so the browser sends the session cookie on it
-// automatically for a same-origin connection — meaning this can enforce
-// the same session check as everything else, not sit behind the REST API
-// as an unauthenticated back door into the same live data.
+// automatically for a same-origin connection — so the upgrade handler runs
+// the same isSessionValid() check as every REST route, not sit behind the
+// REST API as an unauthenticated back door into the same live data.
 // Without a heartbeat, a connection that dies uncleanly (a phone locking,
 // a wifi↔cellular handoff, a laptop lid closing) can sit in wss.clients
 // forever still reporting readyState OPEN — nothing ever tells this
@@ -40,19 +40,21 @@ export function attachWebSocketServer(httpServer) {
       return;
     }
     if (config.auth?.enabled) {
-      const cookies = parseCookies(req);
-      if (!cookies[SESSION_COOKIE]) {
+      // A WebSocket upgrade is an ordinary HTTP request first, so the browser
+      // sends the session cookie on it for a same-origin connection — which
+      // lets this run the exact same check as every REST route (auth.js's
+      // isSessionValid), not just look for the cookie's presence. Presence
+      // alone was forgeable: any client that could reach the port could send
+      // `Cookie: mc_session=anything` and receive the whole broadcast stream.
+      // A stale token whose session has since expired is refused here too; an
+      // already-open socket isn't torn down when its session later lapses
+      // (the next reconnect fails, and it's a read-only feed either way).
+      const token = parseCookies(req)[SESSION_COOKIE];
+      if (!isSessionValid(token, sessionMaxAgeMs(config))) {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
         return;
       }
-      // Session *validity* (not just presence) is re-checked implicitly:
-      // an expired/unknown token still gets a connection here, but every
-      // subsequent REST call from that same browser will 401 and it
-      // already has no way to have gotten this cookie without having
-      // authenticated at least once — full expiry enforcement on the
-      // socket itself isn't worth the extra coupling to auth.js's session
-      // map for what's already a narrow, second-layer gate.
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit('connection', ws, req);
@@ -84,9 +86,35 @@ export function attachWebSocketServer(httpServer) {
   appEvents.on('status', (services) => broadcast({ type: 'status', services }));
   appEvents.on('config', (config) => broadcast({ type: 'config', config: sanitizeConfig(config) }));
   appEvents.on('chat:message', ({ channelId, message }) => broadcast({ type: 'chatMessage', channelId, message }));
+  appEvents.on('chat:messageUpdated', ({ channelId, message }) =>
+    broadcast({ type: 'chatMessageUpdated', channelId, message })
+  );
   appEvents.on('chat:messageDeleted', ({ channelId, messageId }) =>
     broadcast({ type: 'chatMessageDeleted', channelId, messageId })
   );
+  // Code tab — the session list (metadata only) plus the same
+  // message / in-place-edit pair chat uses, so a streamed reply reads as
+  // "typing" on every device at once (see codeStore.js / codeAgent.js).
+  appEvents.on('code:sessions', ({ sessions }) => broadcast({ type: 'codeSessions', sessions }));
+  appEvents.on('code:message', ({ sessionId, message }) => broadcast({ type: 'codeMessage', sessionId, message }));
+  appEvents.on('code:messageUpdated', ({ sessionId, message }) =>
+    broadcast({ type: 'codeMessageUpdated', sessionId, message })
+  );
+  appEvents.on('code:turn', ({ sessionId, running }) => broadcast({ type: 'codeTurn', sessionId, running }));
+  // A background command (Code parity roadmap 2a) started, produced output, or
+  // exited — the "running" strip refetches its list for that session.
+  appEvents.on('code:background', ({ sessionId }) => broadcast({ type: 'codeBackground', sessionId }));
+  appEvents.on('profile:updated', ({ deviceId, profile }) => broadcast({ type: 'profile', deviceId, profile }));
+  // Generated-image events (creative roadmap Phase 1). 'art:progress' is
+  // per-device — only the device that asked for a wallpaper wants the sampler
+  // step count — but it's cheap to broadcast and the client filters on
+  // deviceId. 'art:wallpapers' is the whole pool, re-sent whenever it changes
+  // so every open Appearance panel stays current.
+  appEvents.on('art:progress', (msg) => broadcast({ type: 'artProgress', ...msg }));
+  appEvents.on('art:wallpapers', ({ wallpapers }) => broadcast({ type: 'artWallpapers', wallpapers }));
+  // The Activity view's live feed (ops roadmap Phase 1) — every logActivity()
+  // call, pushed so the timeline appends without a poll.
+  appEvents.on('activity', (entry) => broadcast({ type: 'activity', entry }));
   // Only the profile + the live period, not the whole history — a second
   // open device needs to know what just changed, not get the full
   // multi-period archive re-sent on every keystroke-debounced save.

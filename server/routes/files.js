@@ -6,6 +6,7 @@ import { loadConfig, resolveSharedFolderPath } from '../config.js';
 import { logActivity } from '../activityLog.js';
 import { clientIp } from '../net.js';
 import { planZip, streamPlannedZip, ZipTooLargeError } from '../zip.js';
+import { searchSharedFolder, recordUpload, getRecentUploads } from '../fileShare.js';
 
 export const filesRouter = Router();
 
@@ -142,55 +143,11 @@ filesRouter.delete('/', async (req, res) => {
   }
 });
 
-// Recursive, case-insensitive filename search across the whole shared
-// tree. Capped two ways: MAX_RESULTS stops the response from growing
-// unbounded, MAX_SCANNED stops a huge/deep tree from tying up the event
-// loop for too long on one request — once either cap is hit, whatever's
-// found so far is returned along with a `truncated` flag rather than
-// making the caller wait for a scan that may never finish.
-const SEARCH_MAX_RESULTS = 200;
-const SEARCH_MAX_SCANNED = 20000;
-
-async function searchDir(root, relDir, query, results, scanned) {
-  if (results.length >= SEARCH_MAX_RESULTS || scanned.count >= SEARCH_MAX_SCANNED) return;
-  let entries;
-  try {
-    entries = await fs.readdir(path.join(root, relDir), { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    if (results.length >= SEARCH_MAX_RESULTS || scanned.count >= SEARCH_MAX_SCANNED) return;
-    scanned.count += 1;
-    const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
-    if (entry.name.toLowerCase().includes(query)) {
-      const stat = await fs.stat(path.join(root, relPath)).catch(() => null);
-      results.push({
-        path: relPath,
-        name: entry.name,
-        type: entry.isDirectory() ? 'dir' : 'file',
-        size: stat?.size ?? null,
-        modified: stat?.mtime ?? null,
-      });
-    }
-    if (entry.isDirectory()) {
-      await searchDir(root, relPath, query, results, scanned);
-    }
-  }
-}
-
+// Recursive, case-insensitive filename search across the whole shared tree
+// — see server/fileShare.js for the implementation (shared with the
+// assistant's search_shared_folder tool) and the two caps it enforces.
 filesRouter.get('/search', async (req, res) => {
-  const query = (req.query.q || '').trim().toLowerCase();
-  if (!query) return res.json({ items: [], truncated: false });
-
-  const root = resolveSharedFolderPath(req.mcConfig);
-  const results = [];
-  const scanned = { count: 0 };
-  await searchDir(root, '', query, results, scanned);
-  res.json({
-    items: results,
-    truncated: results.length >= SEARCH_MAX_RESULTS || scanned.count >= SEARCH_MAX_SCANNED,
-  });
+  res.json(await searchSharedFolder(req.mcConfig, req.query.q));
 });
 
 // Rename and move are the same operation (fs.rename) — "rename" is just a
@@ -215,21 +172,11 @@ filesRouter.post('/move', async (req, res) => {
   }
 });
 
-// Last N uploads, newest first — in-memory only, same ephemeral choice as
-// chat history/device tracking/host stats. This is what backs the
-// "Recently added" panel: cheaper and more reliable than re-walking the
-// whole shared folder tree sorted by mtime, and simpler than parsing the
-// human-readable activity log back out as structured data.
-const MAX_RECENT = 30;
-const recentUploads = [];
-
-function recordUpload(relPath, name, size) {
-  recentUploads.unshift({ path: relPath, name, size, uploadedAt: new Date().toISOString() });
-  recentUploads.length = Math.min(recentUploads.length, MAX_RECENT);
-}
-
+// Last N uploads, newest first — in-memory, ephemeral like chat history /
+// device tracking / host stats (see server/fileShare.js, shared with the
+// assistant's get_recent_uploads tool).
 filesRouter.get('/recent', (req, res) => {
-  res.json({ items: recentUploads });
+  res.json({ items: getRecentUploads() });
 });
 
 // Disk storage (streamed straight to its final destination) instead of

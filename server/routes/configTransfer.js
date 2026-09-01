@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, saveConfig } from '../config.js';
+import { writeJsonAtomic } from '../jsonStore.js';
 import { checkNow, forgetService } from '../healthChecker.js';
 import { logActivity } from '../activityLog.js';
 import { clientIp } from '../net.js';
@@ -44,7 +45,7 @@ async function writeBackup(config) {
   await fs.mkdir(BACKUPS_DIR, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const file = path.join(BACKUPS_DIR, `config-${stamp}.json`);
-  await fs.writeFile(file, JSON.stringify(config, null, 2), 'utf-8');
+  await writeJsonAtomic(file, config);
 
   const entries = (await fs.readdir(BACKUPS_DIR)).filter((f) => f.endsWith('.json')).sort();
   const excess = entries.length - MAX_BACKUPS;
@@ -76,7 +77,10 @@ configTransferRouter.post('/import', async (req, res) => {
   const incomingIds = new Set(incoming.services.map((s) => s.id));
 
   const next = {
-    settings: { ...previous.settings, ...incoming.settings },
+    // Merged from the file — except trustProxy, which decides whether
+    // X-Forwarded-For is believed (net.js) and so stays tied to this install
+    // the same way auth/security do below.
+    settings: { ...previous.settings, ...incoming.settings, trustProxy: previous.settings.trustProxy },
     sharedFolder: incoming.sharedFolder ?? previous.sharedFolder,
     alerts: incoming.alerts ?? previous.alerts,
     groups: incoming.groups,
@@ -85,12 +89,19 @@ configTransferRouter.post('/import', async (req, res) => {
     chatChannels: Array.isArray(incoming.chatChannels) && incoming.chatChannels.length
       ? incoming.chatChannels
       : previous.chatChannels,
-    // Never taken from the imported file, under any circumstance — an
-    // import can't disable your password protection or plant a known
-    // password (or quietly change/clear your IP allowlist), even if the
-    // file is malicious or just an old backup from before either existed.
+    // Never taken from the imported file, under any circumstance. auth and
+    // security protect this install directly. ollama, code and comfy carry
+    // host-local, security-sensitive settings — the Ollama/ComfyUI endpoint
+    // URLs, the assistant's action tools, the Code agent's workspace path and
+    // its shell-command switch — that a stale or malicious file must not be
+    // able to set. Keeping them from `previous` (rather than just omitting
+    // them) also stops migrate() from silently resetting them to defaults on
+    // the next load.
     auth: previous.auth,
     security: previous.security,
+    ollama: previous.ollama,
+    code: previous.code,
+    comfy: previous.comfy,
   };
 
   // Whichever branch connections came from, drop any that point at a

@@ -2,81 +2,20 @@ import { Router } from 'express';
 import { loadConfig, saveConfig } from '../config.js';
 import { checkNow, checkOneService, forgetService } from '../healthChecker.js';
 import { sendMagicPacket, isValidMac } from '../wol.js';
-import { runControlCommand } from '../serviceControl.js';
-import { dockerContainerAction, getContainerLogs } from '../docker.js';
+import { controlService } from '../serviceControl.js';
+import { getContainerLogs } from '../docker.js';
+import { addService, normalizeController, normalizeGame } from '../serviceStore.js';
+import { deleteServiceIcon } from '../serviceIcons.js';
+import { getGameStatus, runGameCommand } from '../gameServers.js';
 import { logActivity } from '../activityLog.js';
 import { clientIp } from '../net.js';
 
 export const servicesRouter = Router();
 
-function slugify(name) {
-  return (
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '') || `service-${Date.now()}`
-  );
-}
-
-// Two controller types: 'script' (Wave A — arbitrary shell commands, one
-// per action, each optional so a service can have e.g. just a restart
-// hook) and 'docker' (Wave B — a container name/id; start/stop/restart are
-// standardized by the Docker Engine API itself, so there's nothing to
-// configure per-action beyond which container). Anything without a
-// meaningful value collapses to null rather than an empty-but-truthy
-// object, so "has a controller" stays a reliable check everywhere else.
-function normalizeController(body, existing) {
-  if (body.controller === undefined) return existing ?? null;
-  if (!body.controller || !body.controller.type) return null;
-  const c = body.controller;
-
-  if (c.type === 'docker') {
-    const container = (c.container || '').trim();
-    return container ? { type: 'docker', container } : null;
-  }
-
-  const startCmd = (c.startCmd || '').trim();
-  const stopCmd = (c.stopCmd || '').trim();
-  const restartCmd = (c.restartCmd || '').trim();
-  return startCmd || stopCmd || restartCmd ? { type: 'script', startCmd, stopCmd, restartCmd } : null;
-}
-
 servicesRouter.post('/', async (req, res) => {
-  const config = await loadConfig();
-  const body = req.body;
-  if (!body.name || !body.url) {
-    return res.status(400).json({ error: 'name and url are required' });
-  }
-
-  const mac = (body.mac || '').trim();
-  if (mac && !isValidMac(mac)) {
-    return res.status(400).json({ error: 'mac must look like AA:BB:CC:DD:EE:FF' });
-  }
-
-  let id = slugify(body.name);
-  if (config.services.some((s) => s.id === id)) id = `${id}-${Date.now()}`;
-
-  const service = {
-    id,
-    name: body.name,
-    url: body.url,
-    group: body.group || null,
-    icon: (body.icon || '').trim(),
-    description: body.description || '',
-    healthCheck: body.healthCheck !== false,
-    healthCheckPath: body.healthCheckPath || '/',
-    tailscaleHealthCheck: body.tailscaleHealthCheck === true,
-    tags: Array.isArray(body.tags) ? body.tags : [],
-    pinned: body.pinned === true,
-    mac,
-    controller: normalizeController(body, null),
-  };
-
-  config.services.push(service);
-  await saveConfig(config);
-  logActivity('service', `Created "${service.name}" (${service.url})`, clientIp(req));
-  checkNow(loadConfig).catch(() => {});
-  res.status(201).json(service);
+  const result = await addService(req.body, { via: clientIp(req) });
+  if (result.error) return res.status(400).json(result);
+  res.status(201).json(result.service);
 });
 
 // Reorders a subsequence of services by id, leaving every other service's
@@ -130,7 +69,8 @@ servicesRouter.put('/:id', async (req, res) => {
     tags: Array.isArray(body.tags) ? body.tags : existing.tags,
     pinned: body.pinned !== undefined ? !!body.pinned : existing.pinned,
     mac,
-    controller: normalizeController(body, existing.controller),
+    controller: normalizeController(body.controller, existing.controller),
+    game: normalizeGame(body.game, existing.game),
   };
 
   await saveConfig(config);
@@ -151,6 +91,7 @@ servicesRouter.delete('/:id', async (req, res) => {
   );
   await saveConfig(config);
   forgetService(req.params.id);
+  deleteServiceIcon(req.params.id).catch(() => {}); // generated icon, if any (creative roadmap Phase 1b)
   logActivity('service', `Deleted "${deletedName}"`, clientIp(req));
   // Anything that depended on the deleted service should stop showing
   // degraded immediately rather than waiting out the rest of the current
@@ -187,85 +128,22 @@ servicesRouter.post('/:id/wake', async (req, res) => {
   }
 });
 
-const CONTROL_ACTIONS = {
-  start: { field: 'startCmd', verb: 'start' },
-  stop: { field: 'stopCmd', verb: 'stop' },
-  restart: { field: 'restartCmd', verb: 'restart' },
-};
-
 const lastControlAttempt = new Map(); // `${serviceId}:${action}` -> timestamp
 const CONTROL_COOLDOWN_MS = 2000; // guards against an accidental double-click/tap re-running a command
 
-// Runs a service's configured start/stop/restart command on the host.
-// Gated behind two independent switches on top of the app's normal
-// auth/session checks: security.serviceControl.enabled (an explicit opt-in
-// separate from just having a password set) and auth.enabled itself (this
-// feature runs commands on the host, so Settings won't let it be turned on
-// without password protection already active — see routes/settings.js).
-// Websites are excluded by convention, not by code: nothing stops someone
-// from pointing a controller at a website entry, but the Add/Edit modal
-// only surfaces these fields as an opt-in "advanced" section, so a website
-// simply never gets one filled in.
+// The gate checks, controller dispatch, and activity logging all live in
+// serviceControl.js#controlService (shared with the assistant's action
+// tool). The route adds just the double-click cooldown, which is a
+// button-press concern the tool path doesn't have.
 async function handleControlAction(req, res, action) {
-  const config = await loadConfig();
-  if (!config.security?.serviceControl?.enabled) {
-    return res.status(403).json({ error: 'Service control is off — turn it on in Settings → Security.' });
-  }
-  if (!config.auth?.enabled) {
-    return res.status(403).json({ error: 'Service control requires password protection to be enabled first.' });
-  }
-
-  const service = config.services.find((s) => s.id === req.params.id);
-  if (!service) return res.status(404).json({ error: 'service not found' });
-  if (!service.controller) {
-    return res.status(400).json({ error: 'this service has no control commands configured' });
-  }
-
-  const { verb } = CONTROL_ACTIONS[action];
-  let run;
-
-  if (service.controller.type === 'script') {
-    const cmd = service.controller[CONTROL_ACTIONS[action].field];
-    if (!cmd) return res.status(400).json({ error: `no ${verb} command configured for this service` });
-    run = () => runControlCommand(cmd);
-  } else if (service.controller.type === 'docker') {
-    const container = service.controller.container;
-    run = async () => {
-      try {
-        await dockerContainerAction(container, action);
-        return { ok: true, output: `Docker ${verb} sent to "${container}"` };
-      } catch (err) {
-        return { ok: false, error: err.message };
-      }
-    };
-  } else {
-    return res.status(400).json({ error: 'unsupported controller type' });
-  }
-
-  const cooldownKey = `${service.id}:${action}`;
-  const lastAttempt = lastControlAttempt.get(cooldownKey) || 0;
-  if (Date.now() - lastAttempt < CONTROL_COOLDOWN_MS) {
+  const cooldownKey = `${req.params.id}:${action}`;
+  if (Date.now() - (lastControlAttempt.get(cooldownKey) || 0) < CONTROL_COOLDOWN_MS) {
     return res.status(429).json({ error: 'that command just ran — give it a moment' });
   }
   lastControlAttempt.set(cooldownKey, Date.now());
 
-  logActivity('control', `Running ${verb} for "${service.name}"`, clientIp(req));
-  const result = await run();
-  logActivity(
-    'control',
-    result.ok
-      ? `"${service.name}" ${verb} succeeded`
-      : `"${service.name}" ${verb} failed: ${result.error || 'unknown error'}`,
-    clientIp(req)
-  );
-
-  // Give the process a moment to actually change state before the health
-  // checker looks again, rather than racing it and reporting stale status.
-  setTimeout(() => {
-    checkOneService(loadConfig, service.id).catch(() => {});
-  }, 3000);
-
-  res.json(result);
+  const result = await controlService(req.params.id, action, { via: clientIp(req) });
+  res.status(result.ok ? 200 : 400).json(result);
 }
 
 servicesRouter.post('/:id/start', (req, res) => handleControlAction(req, res, 'start'));
@@ -289,6 +167,46 @@ servicesRouter.get('/:id/logs', async (req, res) => {
   try {
     const logs = await getContainerLogs(service.controller.container, { tail });
     res.json({ logs });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// ---------- Game servers (creative roadmap Phase 5) ----------
+
+// Player list + counts — read-only, so just a normal session (like /logs).
+servicesRouter.get('/:id/game/status', async (req, res) => {
+  const config = await loadConfig();
+  const service = config.services.find((s) => s.id === req.params.id);
+  if (!service?.game?.kind) return res.status(400).json({ error: 'this service is not a game server' });
+  try {
+    // the panel wants the full picture (player names + server info); the
+    // health sweep calls getGameStatus() plain
+    res.json({ online: true, ...(await getGameStatus(service.game, { full: true })) });
+  } catch (err) {
+    res.json({ online: false, error: err.message, players: [], max: null });
+  }
+});
+
+// An RCON command can stop the server, ban players, grant op — so it gets the
+// same double gate as Service Control: the switch AND password auth.
+servicesRouter.post('/:id/game/command', async (req, res) => {
+  const config = await loadConfig();
+  const service = config.services.find((s) => s.id === req.params.id);
+  if (!service?.game?.kind) return res.status(400).json({ error: 'this service is not a game server' });
+  if (!config.security?.serviceControl?.enabled) {
+    return res.status(403).json({ error: 'turn on Service Control (Settings → Security) to run game-server commands' });
+  }
+  if (!config.auth?.enabled) {
+    return res.status(403).json({ error: 'game-server commands need password protection enabled first' });
+  }
+  const command = String(req.body?.command || '').trim();
+  if (!command) return res.status(400).json({ error: 'a command is required' });
+
+  try {
+    const output = await runGameCommand(service.game, command);
+    logActivity('control', `Game command on "${service.name}": ${command.slice(0, 60)}`, clientIp(req));
+    res.json({ output });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }

@@ -23,10 +23,12 @@ import { getActiveSessionCount } from './auth.js';
 import { getLastSweepAt } from './healthChecker.js';
 
 const SAMPLE_INTERVAL_MS = 5000;
+const HISTORY_MAX = 120; // ~10 minutes at 5s — enough for the Board host-stats sparkline
 
 let lastCpuSample = os.cpus();
 let cachedSnapshot = null;
 let timer = null;
+const history = []; // [{ t, cpu, mem, disk }] — cpu/mem/disk are 0-100 percentages
 
 // Poor-man's event loop lag: a 1s setInterval should fire almost exactly
 // 1000ms after the last one. Any excess is time the loop spent blocked on
@@ -114,6 +116,14 @@ async function sample() {
     },
     sampledAt: new Date().toISOString(),
   };
+
+  history.push({
+    t: Date.now(),
+    cpu: cpuPercent,
+    mem: Math.round(((totalMem - freeMem) / totalMem) * 100),
+    disk: cachedSnapshot.disk ? Math.round((cachedSnapshot.disk.used / cachedSnapshot.disk.total) * 100) : null,
+  });
+  if (history.length > HISTORY_MAX) history.shift();
 }
 
 export function startHostHealthSampler() {
@@ -130,4 +140,10 @@ export function stopHostHealthSampler() {
 
 export function getHostHealthSnapshot() {
   return cachedSnapshot;
+}
+
+// The Board's host-stats widget (ops roadmap Phase 2) — a short in-memory
+// ring of recent samples for its sparkline.
+export function getHostHistory() {
+  return history;
 }

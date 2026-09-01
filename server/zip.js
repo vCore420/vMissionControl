@@ -61,7 +61,7 @@ function toDosDateTime(date) {
 // no data) so the folder structure survives extraction even where no file
 // happens to be sitting inside it; a directory with contents doesn't need
 // one since the file paths inside it recreate it on extract.
-async function* walk(root, relDir = '') {
+async function* walk(root, relDir = '', skipDirs = null) {
   const entries = await fsp.readdir(path.join(root, relDir), { withFileTypes: true });
   if (entries.length === 0 && relDir !== '') {
     yield { type: 'dir', relPath: relDir };
@@ -70,7 +70,8 @@ async function* walk(root, relDir = '') {
   for (const entry of entries) {
     const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
-      yield* walk(root, relPath);
+      if (skipDirs?.has(entry.name)) continue; // e.g. node_modules / .git for a code-workspace zip
+      yield* walk(root, relPath, skipDirs);
     } else {
       const absPath = path.join(root, relPath);
       let stat;
@@ -89,10 +90,10 @@ async function* walk(root, relDir = '') {
 // *before* any response headers commit this request to a 200 + streamed
 // body. Callers that need to send that error as a normal JSON response
 // should call this first and separately from streamPlannedZip below.
-export async function planZip(rootAbsPath) {
+export async function planZip(rootAbsPath, { skipDirs = null } = {}) {
   const entries = [];
   let totalSize = 0;
-  for await (const entry of walk(rootAbsPath)) {
+  for await (const entry of walk(rootAbsPath, '', skipDirs)) {
     entries.push(entry);
     if (entry.type === 'file') totalSize += entry.size;
   }
@@ -312,13 +313,4 @@ export async function streamPlannedZip(destStream, entries) {
   const centralDirSize = offset.bytes - centralDirStart;
 
   await writeToStream(destStream, buildEocd(centralRecords.length, centralDirSize, centralDirStart));
-}
-
-// Convenience wrapper for callers with no headers to manage — plans and
-// streams in one call. (The HTTP route uses planZip + streamPlannedZip
-// directly instead, so it can turn a too-large-to-zip result into a
-// normal JSON error rather than a broken response.)
-export async function streamFolderZip(destStream, rootAbsPath) {
-  const { entries } = await planZip(rootAbsPath);
-  await streamPlannedZip(destStream, entries);
 }

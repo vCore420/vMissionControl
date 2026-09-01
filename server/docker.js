@@ -101,7 +101,32 @@ export async function listDockerContainers() {
     name: (c.Names?.[0] || '').replace(/^\//, ''),
     image: c.Image,
     state: c.State,
+    status: c.Status,
   }));
+}
+
+// A single (non-streaming) stats reading. `stream=false` still returns two
+// internal samples so the CPU delta is meaningful — the same math the
+// `docker stats` CLI does. Backs the assistant's get_container_stats tool.
+export async function getContainerStats(container) {
+  const socketPath = await resolveSocketPath();
+  const buffer = await dockerRequest(socketPath, 'GET', `/containers/${encodeURIComponent(container)}/stats?stream=false`);
+  const s = JSON.parse(buffer.toString('utf-8'));
+
+  const cpuDelta = (s.cpu_stats?.cpu_usage?.total_usage ?? 0) - (s.precpu_stats?.cpu_usage?.total_usage ?? 0);
+  const sysDelta = (s.cpu_stats?.system_cpu_usage ?? 0) - (s.precpu_stats?.system_cpu_usage ?? 0);
+  const cpus = s.cpu_stats?.online_cpus || s.cpu_stats?.cpu_usage?.percpu_usage?.length || 1;
+  const cpuPercent = cpuDelta > 0 && sysDelta > 0 ? +((cpuDelta / sysDelta) * cpus * 100).toFixed(1) : 0;
+
+  const memUsed = (s.memory_stats?.usage ?? 0) - (s.memory_stats?.stats?.cache ?? 0);
+  const memLimit = s.memory_stats?.limit ?? 0;
+
+  return {
+    cpuPercent,
+    memoryUsedMB: Math.round(Math.max(0, memUsed) / 1024 ** 2),
+    memoryLimitMB: memLimit ? Math.round(memLimit / 1024 ** 2) : null,
+    memoryPercent: memLimit ? +((Math.max(0, memUsed) / memLimit) * 100).toFixed(1) : null,
+  };
 }
 
 // Non-TTY containers (the common case) multiplex stdout/stderr into frames

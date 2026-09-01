@@ -5,6 +5,7 @@ import {
   verifyPassword,
   createSession,
   destroySession,
+  isSessionValid,
   isRateLimited,
   recordFailedAttempt,
   clearFailedAttempts,
@@ -26,9 +27,13 @@ export const authRouter = Router();
 authRouter.get('/status', async (req, res) => {
   const config = await loadConfig();
   const cookies = parseCookies(req);
+  const enabled = !!config.auth?.enabled;
   res.json({
-    enabled: !!config.auth?.enabled,
-    authenticated: !config.auth?.enabled || !!cookies[SESSION_COOKIE],
+    enabled,
+    // Validate the session for real (matching requireAuth) rather than
+    // trusting cookie presence — see isSessionValid in auth.js for the
+    // redirect-loop this prevents after a server restart.
+    authenticated: !enabled || isSessionValid(cookies[SESSION_COOKIE], sessionMaxAgeMs(config)),
   });
 });
 

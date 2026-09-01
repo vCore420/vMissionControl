@@ -1,0 +1,28 @@
+# systemd --user unit template for Mission Control. Not meant to be
+# copied in by hand — run scripts/install-autostart.sh, which fills in
+# NODE_BIN/WORKDIR below for this machine and installs the result to
+# ~/.config/systemd/user/mission-control.service.
+#
+# Runs as a user unit (not a system-wide /etc/systemd/system one) so it
+# needs no sudo and no root-owned config, same trust level as the
+# Windows Task Scheduler task (/RL LIMITED) it replaces. It starts when
+# this user's systemd instance starts, which normally means "on login" —
+# matching Task Scheduler's ONLOGON trigger. For a headless box where
+# Mission Control should be up even with nobody logged in, additionally
+# run: loginctl enable-linger $USER (one-time, needs sudo).
+[Unit]
+Description=Mission Control
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__WORKDIR__
+ExecStart=__NODE_BIN__ server/index.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:__WORKDIR__/mission-control.log
+StandardError=append:__WORKDIR__/mission-control.log
+
+[Install]
+WantedBy=default.target

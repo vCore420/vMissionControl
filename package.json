@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "An installable LAN homepage for locally-hosted services and everyday websites — live status and uptime history, dependency-aware connections between services, start/stop/restart and log access for Docker/host services, a shared file browser, chat, and a quick-launch omnibox.",
+  "description": "A self-hosted LAN dashboard: live service status + uptime history, start/stop/restart and logs for Docker/host services, a shared file browser, chat, a customisable board of widgets, scheduled tasks, and a local-Ollama coding agent that reads and edits files in a sandboxed workspace. Zero build step — plain ES modules, three dependencies.",
   "license": "MIT",
   "engines": {
     "node": ">=18.17.0"

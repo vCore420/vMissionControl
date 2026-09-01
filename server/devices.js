@@ -14,7 +14,7 @@ const devices = new Map(); // ip -> device record
 
 function normalizeIp(ip) {
   if (!ip) return 'unknown';
-  return ip.replace(/^::ffff:/, ''); // unwrap IPv4-mapped IPv6 (::ffff:192.168.1.23) for clean display
+  return ip.replace(/^::ffff:/, ''); // unwrap IPv4-mapped IPv6 (::ffff:192.168.x.x) for clean display
 }
 
 function parseUserAgent(ua) {

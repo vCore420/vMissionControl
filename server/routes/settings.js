@@ -302,7 +302,7 @@ settingsRouter.put('/', async (req, res) => {
       : config.security.ipAllowlist.subnets;
     const bad = subnets.find((cidr) => !isValidCidr(cidr));
     if (bad) {
-      return res.status(400).json({ error: `"${bad}" isn't a valid IP or CIDR range (e.g. 192.168.1.0/24)` });
+      return res.status(400).json({ error: `"${bad}" isn't a valid IP or CIDR range (e.g. <your-LAN-IP>/24)` });
     }
     const willBeEnabled = incoming.enabled !== undefined ? !!incoming.enabled : config.security.ipAllowlist.enabled;
     if (willBeEnabled && !isIpAllowed({ security: { ipAllowlist: { enabled: true, subnets } } }, ip)) {

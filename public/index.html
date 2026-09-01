@@ -23,6 +23,15 @@
             for (var k in tokens) document.documentElement.style.setProperty('--' + k, tokens[k]);
           }
         }
+        // Generated wallpaper (creative roadmap Phase 1) — same no-flash
+        // treatment as the theme. The id maps to a stable, hard-cached image
+        // URL, so this is all it takes; core.js keeps the in-memory copy.
+        var wp = localStorage.getItem('mc:wallpaper');
+        if (wp) {
+          document.documentElement.style.setProperty(
+            '--wallpaper-image', "url(\"/api/art/wallpapers/" + encodeURIComponent(wp) + "/image\")");
+          document.documentElement.classList.add('has-wallpaper');
+        }
       } catch (e) {}
     })();
   </script>
@@ -51,7 +60,9 @@
       <button data-view="dashboard" class="active">Dashboard</button>
       <button data-view="files">Files</button>
       <button data-view="chat">Chat<span class="nav-badge hidden" id="chatBadge">0</span></button>
+      <button data-view="code">Code</button>
       <button data-view="timesheet">Timesheets</button>
+      <button data-view="activity">Activity</button>
     </nav>
     <div class="toolbar-dashboard-controls" id="toolbarDashboardControls">
       <input id="search" type="search" placeholder="Search services…" />
@@ -68,6 +79,7 @@
         <button type="button" data-layout="card" class="active" title="Cards">🗃️</button>
         <button type="button" data-layout="list" title="List">☰</button>
         <button type="button" data-layout="graph" title="Graph">🕸️</button>
+        <button type="button" data-layout="board" title="Board — your own widgets">🧩</button>
       </div>
     </div>
 
@@ -82,6 +94,14 @@
       <div class="services-graph hidden" id="servicesGraphView">
         <svg id="graphOverlay"></svg>
         <div class="graph-nodes" id="graphNodes"></div>
+      </div>
+      <div class="board-view hidden" id="servicesBoardView">
+        <div class="board-grid" id="boardGrid"></div>
+        <div class="board-empty hidden" id="boardEmpty">
+          <p>Your board is empty. Add a widget — embed a page, a note, or a set of links.</p>
+        </div>
+        <button type="button" id="addWidgetBtn" class="btn ghost board-add-btn">+ Add a widget</button>
+        <button type="button" id="enterKioskBtn" class="btn ghost board-add-btn" title="Full-screen this board with no chrome — for a wall display">⛶ Kiosk mode</button>
       </div>
       <p class="empty-state hidden" id="emptyState">No services yet — add your first one.</p>
     </div>
@@ -133,8 +153,15 @@
 
       <div class="chat-main">
         <div class="chat-header">
-          <span id="chatChannelTitle">General</span>
+          <div class="chat-header-left">
+            <button type="button" id="chatChannelsToggle" class="icon-btn chat-channels-toggle" title="Show or hide the channel list" aria-label="Toggle channel list">☰</button>
+            <span id="chatChannelTitle">General</span>
+          </div>
           <div class="chat-header-actions">
+            <button type="button" id="chatAiToggle" class="chat-ai-toggle" role="switch" aria-checked="false" disabled>
+              <span class="chat-ai-toggle-face">🦙</span>
+              <span class="chat-ai-toggle-text">Assistant off</span>
+            </button>
             <div class="layout-switch" id="chatLayoutSwitch">
               <button type="button" data-layout="tabs" class="active" title="Tabs — channels above, like today">☰</button>
               <button type="button" data-layout="sidebar" title="Sidebar — channel list beside the conversation">🗂</button>
@@ -157,12 +184,109 @@
           <div class="chat-composer-row">
             <button type="button" id="chatAttachBtn" class="icon-btn" title="Attach a file">📎</button>
             <input type="file" id="chatFileInput" hidden />
-            <textarea id="chatTextInput" placeholder="Message this channel…"></textarea>
+            <textarea id="chatTextInput" rows="1" placeholder="Message this channel…"></textarea>
             <button type="submit" class="btn primary">Send</button>
           </div>
         </form>
       </div>
     </div>
+  </main>
+
+  <main id="codeView" class="view">
+    <div class="code-layout" id="codeLayout">
+      <aside class="code-sidebar" id="codeSidebar">
+        <div class="code-sidebar-header">
+          <span>Sessions</span>
+          <button type="button" id="newCodeSessionBtn" class="icon-btn" title="New session">＋</button>
+        </div>
+        <div class="code-session-list" id="codeSessionList"></div>
+      </aside>
+
+      <div class="code-main">
+        <div class="code-header">
+          <button type="button" id="codeSidebarToggle" class="icon-btn" title="Show or hide the session list" aria-label="Toggle session list">☰</button>
+          <span class="code-header-id" id="codeHeaderAvatar"></span>
+          <span id="codeSessionTitle">No session</span>
+          <span id="codeContextMeter" class="code-context hidden" title="Rough estimate of context used"></span>
+          <button type="button" id="codeWorkspaceToggle" class="icon-btn" title="Show or hide the workspace panel" aria-label="Toggle workspace panel">🗂</button>
+          <div class="code-header-actions">
+            <label class="code-plan-toggle" title="Plan mode: the agent investigates and writes a plan, but changes nothing. Save the plan to the memory file when it's agreed.">
+              <input type="checkbox" id="codePlanMode" /> Plan
+            </label>
+            <select id="codeApprovalSelect" title="How file changes are approved in this session">
+              <option value="ask">Ask each change</option>
+              <option value="auto-edit">Auto-apply edits</option>
+              <option value="auto-all">Auto-apply all</option>
+            </select>
+            <select id="codeModelSelect" title="Model for this session"></select>
+            <button type="button" id="codeStopBtn" class="btn ghost hidden">Stop</button>
+          </div>
+        </div>
+
+        <div class="code-tasks hidden" id="codeTasks">
+          <div class="code-tasks-head">
+            <button type="button" id="codeTasksToggle" class="code-tasks-toggle" title="Collapse / expand">
+              <span id="codeTasksSummary">Tasks</span>
+            </button>
+            <button type="button" id="codeTasksClear" class="icon-btn" title="Clear the task list">✕</button>
+          </div>
+          <ul class="code-tasks-list" id="codeTasksList"></ul>
+        </div>
+
+        <div class="code-messages" id="codeMessages"></div>
+        <p class="empty-state hidden" id="codeNoSessionState">No session yet — press ＋ to start one.</p>
+        <div class="empty-state code-empty hidden" id="codeEmptyState">
+          <p>Ask me to explore, explain, or change the code in this workspace.</p>
+          <div class="code-example-chips">
+            <button type="button" data-fill="Give me a quick tour of this project — the main files and what they do.">Tour the project</button>
+            <button type="button" data-fill="Read the main entry file and walk me through how it works.">Explain the entry point</button>
+            <button type="button" data-fill="Run the tests and tell me whether they pass.">Run the tests</button>
+          </div>
+        </div>
+
+        <div class="code-background hidden" id="codeBackground">
+          <div class="code-background-head">
+            <span id="codeBackgroundSummary">Running processes</span>
+          </div>
+          <ul class="code-background-list" id="codeBackgroundList"></ul>
+        </div>
+
+        <form id="codeComposer" class="code-composer">
+          <div class="code-attach-row hidden" id="codeAttachRow"></div>
+          <div class="code-mention-row hidden" id="codeMentionRow"></div>
+          <div class="code-image-row hidden" id="codeImageRow"></div>
+          <div class="code-mention-picker hidden" id="codeMentionPicker" role="listbox" aria-label="Workspace files"></div>
+          <div class="code-composer-row">
+            <button type="button" id="codeAttachBtn" class="icon-btn" title="Attach a text file for this message">📎</button>
+            <button type="button" id="codeImageBtn" class="icon-btn" title="Attach an image (the vision model describes it)">📷</button>
+            <button type="button" id="codeMentionBtn" class="icon-btn" title="Reference a workspace file (@)">@</button>
+            <button type="button" id="codeCommandBtn" class="icon-btn" title="Run a command (/)">/</button>
+            <input type="file" id="codeFileInput" multiple hidden />
+            <input type="file" id="codeImageInput" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
+            <textarea id="codeTextInput" rows="1" placeholder="Describe what you want to build or change…  @ file · / command"></textarea>
+            <button type="submit" class="btn primary" id="codeSendBtn">Send</button>
+          </div>
+        </form>
+      </div>
+
+      <aside class="code-workspace" id="codeWorkspacePanel">
+        <div class="code-workspace-header">
+          <span>Workspace</span>
+          <span class="code-workspace-actions">
+            <a id="codeWorkspaceZip" class="icon-btn" href="/api/code/workspace/download-zip" title="Download the workspace as a .zip (node_modules and .git left out)" aria-label="Download workspace as zip" download>⬇</a>
+            <button type="button" id="codeWorkspaceRefresh" class="icon-btn" title="Refresh">↻</button>
+          </span>
+        </div>
+        <p class="code-workspace-path" id="codeWorkspacePath" title="Where the agent works"></p>
+        <div class="code-ctx-prompt hidden" id="codeContextFilePrompt"></div>
+        <div class="code-workspace-tree" id="codeWorkspaceList"></div>
+      </aside>
+    </div>
+
+    <p class="empty-state hidden" id="codeDisabledState">
+      The Code workspace is off. Turn it on in Settings → Code — it needs
+      password protection enabled first.
+    </p>
   </main>
 
   <main id="timesheetView" class="view">
@@ -273,6 +397,27 @@
     </div>
   </main>
 
+  <main id="activityView" class="view">
+    <div class="activity-toolbar">
+      <div class="activity-cats" id="activityCats"></div>
+      <div class="activity-controls">
+        <select id="activityRange">
+          <option value="1">Last hour</option>
+          <option value="6">Last 6 hours</option>
+          <option value="24" selected>Last 24 hours</option>
+          <option value="168">Last 7 days</option>
+          <option value="720">Last 30 days</option>
+        </select>
+        <input type="search" id="activitySearch" placeholder="Search the log…" />
+      </div>
+    </div>
+    <div class="activity-list" id="activityList"></div>
+    <div class="activity-foot">
+      <button type="button" id="activityMoreBtn" class="btn ghost hidden">Load older</button>
+      <span id="activityEmpty" class="settings-hint hidden">Nothing in this window.</span>
+    </div>
+  </main>
+
   <!-- Add/Edit service modal -->
   <div id="serviceModal" class="modal hidden">
     <div class="modal-card">
@@ -280,7 +425,19 @@
       <form id="serviceForm">
         <label>Name<input name="name" required placeholder="e.g. Jellyfin" /></label>
         <label>URL<input name="url" required placeholder="http://127.0.0.1:8096" /></label>
-        <label>Icon (emoji, optional — leave blank to use the site's favicon)<input name="icon" placeholder="🔧" maxlength="4" /></label>
+        <label>Icon (emoji, optional — leave blank to use the site's favicon)
+          <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">An emoji here, or leave it blank for the site's favicon. With ComfyUI set up, "Generate" makes a custom icon from the service's name and description — save the service first, then generate. The generated icon overrides the emoji/favicon; "Remove" clears it.</span></button>
+          <input name="icon" placeholder="🔧" maxlength="4" />
+        </label>
+        <div class="service-icon-generate hidden" id="serviceIconGenerate">
+          <div class="service-icon-preview" id="serviceIconPreview"></div>
+          <div class="service-icon-gen-actions">
+            <input type="text" id="serviceIconExtra" maxlength="160" placeholder="Optional: extra direction for the icon" />
+            <button type="button" id="generateServiceIconBtn" class="btn ghost">✨ Generate icon</button>
+            <button type="button" id="removeServiceIconBtn" class="btn ghost hidden">Remove icon</button>
+          </div>
+          <div id="serviceIconProgress" class="wallpaper-progress hidden"></div>
+        </div>
         <label>Group
           <select name="group" id="serviceGroupSelect"></select>
         </label>
@@ -332,6 +489,31 @@
             <p id="containerPickerError" class="login-error hidden"></p>
           </div>
         </div>
+        <div class="settings-section">
+          <h3>Game server (advanced, optional)
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Turns this service into a game server: it's checked over RCON instead of an HTTP ping (the card shows the player count), and gets a 🎮 console. Enable RCON in the server's config (<code>enable-rcon=true</code>, <code>rcon.port</code>, <code>rcon.password</code> for Minecraft). The password is stored on the host, never sent to a browser. Running a console command needs Service Control on (Settings → Security) — it's a real command on the server.</span></button>
+          </h3>
+          <label>Game
+            <select name="gameKind" id="gameKindSelect">
+              <option value="">None</option>
+              <option value="minecraft">Minecraft (RCON)</option>
+              <option value="fivem">FiveM (txAdmin)</option>
+            </select>
+          </label>
+          <div id="gameMinecraftFields" class="hidden">
+            <div class="inline-form">
+              <label style="flex:2;">RCON host<input name="gameRconHost" placeholder="127.0.0.1" /></label>
+              <label style="flex:1;">Port<input name="gameRconPort" type="number" min="1" max="65535" placeholder="25575" /></label>
+            </div>
+            <label>RCON password<input name="gameRconPassword" type="password" autocomplete="off" placeholder="paste a new password" /></label>
+            <p class="settings-hint" id="gameRconKeyHint"></p>
+          </div>
+          <div id="gameFivemFields" class="hidden">
+            <label>FiveM server URL (the game port)<input name="gameQueryUrl" placeholder="http://localhost:30120" /></label>
+            <label>txAdmin URL (optional — just a link)<input name="gameTxAdminUrl" placeholder="http://localhost:40120" /></label>
+            <p class="settings-hint">Mission Control reads the server's own <code>/dynamic.json</code> / <code>/players.json</code> (no auth). Restart and console stay in txAdmin — the console panel links to it.</p>
+          </div>
+        </div>
         <div class="modal-actions">
           <button type="button" id="deleteServiceBtn" class="btn danger hidden">Delete</button>
           <div class="spacer"></div>
@@ -342,19 +524,154 @@
     </div>
   </div>
 
+  <!-- Board widget modal (creative roadmap Phase 3) -->
+  <div id="widgetModal" class="modal hidden">
+    <div class="modal-card">
+      <h2 id="widgetModalTitle">Add a widget</h2>
+      <form id="widgetForm">
+        <label id="widgetTypeField">Type
+          <select name="type" id="widgetTypeSelect">
+            <option value="iframe">Embedded page (iframe)</option>
+            <option value="note">Note (Markdown)</option>
+            <option value="links">Link cluster</option>
+            <option value="fetch">Live value (from an endpoint)</option>
+            <option value="jellyfin">Jellyfin — now playing</option>
+            <option value="host-stats">Host stats (CPU / memory / disk)</option>
+            <option value="service-status">Service status</option>
+            <option value="clock">Clock</option>
+            <option value="countdown">Countdown</option>
+            <option value="photo">Photo frame</option>
+            <option value="docker">Docker containers</option>
+          </select>
+        </label>
+        <label>Title (optional)<input name="title" maxlength="60" placeholder="e.g. Pi-hole" /></label>
+        <label>Size
+          <select name="size" id="widgetSizeSelect">
+            <option value="sm">Small</option>
+            <option value="md">Medium</option>
+            <option value="lg">Wide (full row)</option>
+          </select>
+        </label>
+        <div id="widgetIframeFields">
+          <label>URL<input name="url" placeholder="http://192.168.1.10:8080" /></label>
+          <label>Height (px)<input name="height" type="number" min="120" max="900" placeholder="260" style="max-width:8rem;" /></label>
+          <p class="settings-hint">The page loads sandboxed. Some sites refuse to be embedded (they send <code>X-Frame-Options</code>) — that's the site's choice, not something this can override.</p>
+        </div>
+        <div id="widgetNoteFields" class="hidden">
+          <label>Markdown
+            <textarea name="markdown" rows="6" maxlength="4000" placeholder="## Notes&#10;- anything you want on the board" style="width:100%;box-sizing:border-box;font-family:var(--mono,monospace);font-size:0.85rem;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);resize:vertical;"></textarea>
+          </label>
+        </div>
+        <div id="widgetFetchFields" class="hidden">
+          <label>Endpoint URL<input name="fetchUrl" placeholder="http://192.168.1.5/admin/api.php?summary" /></label>
+          <label>Display template
+            <input name="template" maxlength="500" placeholder="Blocked today: {{ ads_blocked_today }}" />
+          </label>
+          <p class="settings-hint">The server fetches this and fills in <code>{{ path.to.field }}</code> from the JSON (<code>{{ items.0.name }}</code> for arrays). Leave the template blank to show the raw response. Any token in the URL is stored like the alert webhook — visible to signed-in devices.</p>
+          <label>Refresh every (seconds)<input name="refreshSec" type="number" min="10" max="3600" placeholder="60" style="max-width:8rem;" /></label>
+        </div>
+        <div id="widgetLinksFields" class="hidden">
+          <div id="widgetLinksList" class="widget-links-list"></div>
+          <button type="button" id="widgetAddLinkBtn" class="btn ghost" style="margin-top:6px;">+ Add a link</button>
+        </div>
+        <div id="widgetHostStatsFields" class="hidden">
+          <p class="settings-hint">Shows this host's CPU, memory and disk with a live sparkline. No settings.</p>
+        </div>
+        <div id="widgetServiceStatusFields" class="hidden">
+          <p class="settings-hint">Pick the services to show at a glance — status dot, name, latency.</p>
+          <div id="widgetServiceChecklist" class="checklist" style="max-height:200px;"></div>
+        </div>
+        <div id="widgetClockFields" class="hidden">
+          <label>Time zone (blank = this device's local time)
+            <input name="timezone" list="tzList" placeholder="e.g. Pacific/Auckland" />
+          </label>
+          <datalist id="tzList"></datalist>
+          <label class="checkbox-row"><input type="checkbox" name="showSeconds" /> Show seconds</label>
+          <label class="checkbox-row"><input type="checkbox" name="showDate" checked /> Show the date</label>
+        </div>
+        <div id="widgetCountdownFields" class="hidden">
+          <label>Count down to<input name="target" type="datetime-local" /></label>
+          <label>Label (optional)<input name="label" maxlength="60" placeholder="e.g. Server wipe" /></label>
+        </div>
+        <div id="widgetPhotoFields" class="hidden">
+          <label>Folder (in the shared folder, blank = its root)
+            <input name="folder" maxlength="400" placeholder="e.g. Photos/wallpapers" />
+          </label>
+          <p class="settings-hint">Rotates through the images in that folder. Needs the shared folder turned on (Settings → Sharing); the list refreshes every few minutes so new photos appear.</p>
+          <label>Change every (seconds)<input name="rotateSec" type="number" min="5" max="3600" placeholder="20" style="max-width:8rem;" /></label>
+          <label>Fit
+            <select name="fit">
+              <option value="cover">Fill the tile (crop)</option>
+              <option value="contain">Fit the whole image</option>
+            </select>
+          </label>
+          <label class="checkbox-row"><input type="checkbox" name="shuffle" checked /> Shuffle order</label>
+        </div>
+        <div id="widgetDockerFields" class="hidden">
+          <p class="settings-hint">Pick containers to show — state dot, name, and start / stop / restart / logs. Start/stop/restart need Service Control on (Settings → Security); logs are read-only. Leave all unchecked to show every container.</p>
+          <div id="widgetDockerChecklist" class="checklist" style="max-height:220px;"></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="deleteWidgetBtn" class="btn danger hidden">Delete</button>
+          <div class="spacer"></div>
+          <button type="button" id="cancelWidgetBtn" class="btn ghost">Cancel</button>
+          <button type="submit" class="btn primary">Save</button>
+        </div>
+        <p id="widgetFormError" class="login-error hidden"></p>
+      </form>
+    </div>
+  </div>
+
   <!-- Settings modal -->
   <div id="settingsModal" class="modal hidden">
     <div class="modal-card settings-card">
       <h2>Settings</h2>
 
       <div class="settings-tabs" id="settingsTabs">
+        <button type="button" data-tab="profile">Profile</button>
         <button type="button" data-tab="appearance">Appearance</button>
         <button type="button" data-tab="services">Services</button>
         <button type="button" data-tab="notifications">Notifications</button>
+        <button type="button" data-tab="ollama">Ollama</button>
+        <button type="button" data-tab="comfy">ComfyUI</button>
+        <button type="button" data-tab="jellyfin">Jellyfin</button>
+        <button type="button" data-tab="code">Code</button>
+        <button type="button" data-tab="snippets">Snippets</button>
+        <button type="button" data-tab="scheduled">Scheduled</button>
         <button type="button" data-tab="sharing">Sharing</button>
         <button type="button" data-tab="security">Security</button>
         <button type="button" data-tab="devices">Devices</button>
         <button type="button" data-tab="backup">Backup</button>
+      </div>
+
+      <div class="settings-tab-panel" data-tab-panel="profile">
+        <div class="settings-section">
+          <h3>Your profile
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Your display name and picture for this device — saved on the host, synced to every device you open, and shown next to your messages in Chat and Code. Each browser has its own profile; there are no accounts. Pick a generated sprite (🎲 for another), upload an image, or — with ComfyUI set up — generate one from a description (a few minutes on CPU). The name saves with the button; an image saves as soon as it's set.</span></button>
+          </h3>
+          <label>Display name
+            <input id="profileName" type="text" maxlength="40" placeholder="Your name" style="max-width:18rem;" />
+          </label>
+          <div class="profile-avatar-row">
+            <div class="profile-avatar-preview" id="profileAvatarPreview"></div>
+            <div class="profile-avatar-actions">
+              <button type="button" id="profileShuffleBtn" class="btn ghost">🎲 New sprite</button>
+              <button type="button" id="profileImageBtn" class="btn ghost">Upload image…</button>
+              <input type="file" id="profileImageInput" accept="image/*" hidden />
+              <button type="button" id="profileRemoveImageBtn" class="btn ghost hidden">Remove image</button>
+            </div>
+          </div>
+          <div class="avatar-generate hidden" id="avatarGenerate">
+            <input type="text" id="avatarPrompt" maxlength="200" placeholder="Describe an avatar, e.g. &quot;a fox astronaut&quot;" />
+            <div class="avatar-style-chips" id="avatarStyleChips"></div>
+            <button type="button" id="generateAvatarBtn" class="btn ghost">✨ Generate avatar</button>
+            <div id="avatarProgress" class="wallpaper-progress hidden"></div>
+          </div>
+          <div class="inline-form">
+            <button type="button" id="saveProfileBtn" class="btn">Save name</button>
+            <span id="profileSaveNote" class="settings-hint"></span>
+          </div>
+        </div>
       </div>
 
       <div class="settings-tab-panel" data-tab-panel="appearance">
@@ -365,6 +682,18 @@
             <p class="settings-hint">Pick your own colors — changes apply and save immediately, and stick around until you edit them again.</p>
             <div id="customThemeFields" class="custom-theme-fields"></div>
           </div>
+        </div>
+        <div class="settings-section" id="wallpaperSection">
+          <h3>Wallpaper
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">A backdrop for the whole app, generated by ComfyUI with a prompt built from your current theme (add your own words in the box for extra direction). The pick is per-device, like the theme itself; the images it makes are shared to every device's list here. Generation runs on the host and takes a few minutes on CPU. Needs ComfyUI set up in Settings → ComfyUI.</span></button>
+          </h3>
+          <div id="wallpaperGrid" class="wallpaper-grid"></div>
+          <div class="wallpaper-generate">
+            <input type="text" id="wallpaperPrompt" maxlength="200" placeholder="Optional: extra direction, e.g. &quot;mountains at dawn&quot;" />
+            <button type="button" id="generateWallpaperBtn" class="btn">Generate for this theme</button>
+          </div>
+          <div id="wallpaperProgress" class="wallpaper-progress hidden"></div>
+          <p class="settings-hint" id="wallpaperComfyHint" style="display:none;">Set up ComfyUI in Settings → ComfyUI to generate wallpapers.</p>
         </div>
       </div>
 
@@ -418,6 +747,353 @@
             </select>
           </label>
           <button type="button" id="sendTestAlertBtn" class="btn ghost">Send test alert</button>
+        </div>
+      </div>
+
+      <div class="settings-tab-panel" data-tab-panel="ollama">
+        <div class="settings-section">
+          <h3>Ollama Assistant
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">An optional local LLM that joins the chat. Set the connection and model here, then turn it on with the toggle in the Chat view. Once on, any chat message containing the trigger word (below) is also answered by the model — everyone in the channel sees your message and its reply.</span></button>
+          </h3>
+          <label>Ollama URL
+            <input id="ollamaBaseUrl" type="text" placeholder="http://localhost:11434" />
+          </label>
+          <label>Model
+            <div class="inline-form">
+              <select id="ollamaModel" style="flex:1;min-width:0;"></select>
+              <button type="button" id="refreshOllamaModelsBtn" class="btn ghost" title="Reload the list from Ollama (save the URL first)">↻</button>
+            </div>
+          </label>
+          <p id="ollamaModelsError" class="login-error hidden"></p>
+        </div>
+        <div class="settings-section">
+          <h3>Personality card
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">The name and face its messages appear under in chat, plus the system prompt that shapes how it responds.</span></button>
+          </h3>
+          <label>Name<input id="ollamaBotName" type="text" placeholder="Ollama" maxlength="40" /></label>
+          <label>Avatar emoji<input id="ollamaBotEmoji" type="text" placeholder="🦙" maxlength="8" style="max-width:5rem;" /></label>
+          <label>System prompt
+            <textarea id="ollamaSystemPrompt" rows="5" placeholder="You are a helpful assistant in a home-network chat room…" style="width:100%;box-sizing:border-box;font-family:inherit;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);resize:vertical;"></textarea>
+          </label>
+        </div>
+        <div class="settings-section">
+          <h3>Trigger &amp; context
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">The trigger is the word that routes a message to the model. Context is how many recent messages from that channel are sent along each time, so it can follow the conversation. Keep-alive is how long Ollama holds the model in memory between messages.</span></button>
+          </h3>
+          <label>Trigger word
+            <input id="ollamaTrigger" type="text" placeholder="@ollama" style="max-width:12rem;" />
+          </label>
+          <label>Chat history sent as context (messages)
+            <input id="ollamaContextMessages" type="number" min="0" max="100" style="max-width:8rem;" />
+          </label>
+          <label>Keep model loaded for
+            <input id="ollamaKeepAlive" type="text" placeholder="30m" style="max-width:8rem;" />
+          </label>
+          <label>Max reply length (tokens, 0 = model default)
+            <input id="ollamaNumPredict" type="number" min="0" max="8192" style="max-width:8rem;" />
+          </label>
+          <label>Reply timeout (seconds)
+            <input id="ollamaTimeoutSec" type="number" min="5" max="600" style="max-width:8rem;" />
+          </label>
+        </div>
+        <div class="settings-section">
+          <h3>Live data lookups
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">When on, the assistant can call read-only lookups — service status, host health, connected devices, the connection graph, container logs — to answer questions like "what's offline?". It only reads what's already visible in the dashboard; nothing is changed and no commands run. Needs a tool-capable model (llama3.1/3.2, mistral-nemo, granite, qwen3…); one without tool support just ignores it, and "thinking" models like qwen3 work but are noticeably slower.</span></button>
+          </h3>
+          <label class="checkbox-row">
+            <input type="checkbox" id="ollamaTools" />
+            Let the assistant look up live system data to answer questions
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="ollamaActions" />
+            Let the assistant <em>do</em> things — with your confirmation each time
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Lets the assistant propose actions like waking a device or restarting a service. Nothing runs until you press Confirm on a card in the chat. Requires password protection (same rule as Service Control), and is separate from the read-only lookups above.</span></button>
+          </label>
+          <p id="ollamaActionsWarning" class="login-error hidden">Set a password (Security tab) first — the assistant can't be given actions without password protection.</p>
+        </div>
+        <div class="inline-form">
+          <button type="button" id="saveOllamaBtn" class="btn">Save Ollama settings</button>
+          <button type="button" id="testOllamaBtn" class="btn ghost">Send a test message</button>
+        </div>
+        <p id="ollamaSaveError" class="login-error hidden"></p>
+        <p id="ollamaTestResult" class="settings-hint hidden"></p>
+        <p class="settings-hint">The test and the Chat-view toggle both use the <em>saved</em> settings — press Save first if you just changed something.</p>
+      </div>
+
+      <div class="settings-tab-panel" data-tab-panel="comfy">
+        <div class="settings-section">
+          <h3>ComfyUI image generation
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Lets the Code agent and the <code>@cyn</code> chat assistant generate images through a local ComfyUI. The agent calls it when it needs an asset; images are saved into the Code workspace (or posted into chat). It writes files on the host, so — like the Code feature — it needs password protection.</span></button>
+          </h3>
+          <label class="checkbox-row">
+            <input type="checkbox" id="comfyEnabled" />
+            Enable ComfyUI image generation
+          </label>
+          <p id="comfyAuthWarning" class="login-error hidden">
+            Set a password (Security tab) first — image generation can't be turned on without password protection.
+          </p>
+          <label>ComfyUI URL
+            <input id="comfyBaseUrl" type="text" placeholder="http://127.0.0.1:8188" />
+          </label>
+          <div class="inline-form">
+            <button type="button" id="testComfyBtn" class="btn ghost">Test connection</button>
+          </div>
+          <p id="comfyStatusResult" class="settings-hint hidden"></p>
+        </div>
+        <div class="settings-section">
+          <h3>Workflow
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">In ComfyUI, enable Dev Mode (Settings → "Enable Dev mode Options"), build a text-to-image workflow, then use <strong>Save (API Format)</strong> and paste the JSON here. "Detect nodes" works out which node inputs hold the prompt, seed, size and checkpoint — MC patches just those per generation and leaves the rest of your workflow alone.</span></button>
+          </h3>
+          <label>Default checkpoint
+            <div class="inline-form">
+              <select id="comfyModel" style="flex:1;min-width:0;"></select>
+              <button type="button" id="refreshComfyModelsBtn" class="btn ghost" title="Reload the list from ComfyUI (save the URL first)">↻</button>
+            </div>
+          </label>
+          <p id="comfyModelsError" class="login-error hidden"></p>
+          <label>Workflow JSON (API format)
+            <textarea id="comfyWorkflow" rows="7" placeholder='Paste the "Save (API Format)" export here…' style="width:100%;box-sizing:border-box;font-family:var(--mono,monospace);font-size:0.82rem;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);resize:vertical;"></textarea>
+          </label>
+          <div class="inline-form">
+            <button type="button" id="detectComfyBtn" class="btn ghost">Detect nodes</button>
+          </div>
+          <p id="comfyMappingResult" class="settings-hint hidden"></p>
+        </div>
+        <div class="settings-section">
+          <h3>Generation defaults
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Used when the agent doesn't specify. The prefix/suffix wrap the agent's prompt — e.g. a prefix of "masterpiece, best quality" means the agent only has to describe the subject.</span></button>
+          </h3>
+          <label>Negative prompt
+            <textarea id="comfyDefaultNegative" rows="3" placeholder="lowres, bad anatomy, watermark, text…" style="width:100%;box-sizing:border-box;font-family:inherit;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);resize:vertical;"></textarea>
+          </label>
+          <label>Prompt prefix<input id="comfyPromptPrefix" type="text" placeholder="masterpiece, best quality" /></label>
+          <label>Prompt suffix<input id="comfyPromptSuffix" type="text" placeholder="game asset, plain background" /></label>
+          <div class="inline-form">
+            <label style="flex:0 0 auto;">Width<input id="comfyDefaultWidth" type="number" min="64" max="4096" step="8" style="max-width:7rem;" /></label>
+            <label style="flex:0 0 auto;">Height<input id="comfyDefaultHeight" type="number" min="64" max="4096" step="8" style="max-width:7rem;" /></label>
+            <label style="flex:0 0 auto;">Steps<input id="comfyDefaultSteps" type="number" min="1" max="150" style="max-width:6rem;" /></label>
+            <label style="flex:0 0 auto;">CFG<input id="comfyDefaultCfg" type="number" min="0" max="30" step="0.5" style="max-width:6rem;" /></label>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3>Behaviour
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">"Release VRAM after" unloads the ComfyUI models that long after the last image so other GPU work has room (0 = never). "Max images per turn" caps how many the Code agent can generate in one go.</span></button>
+          </h3>
+          <label>Generation timeout (seconds)
+            <input id="comfyTimeoutSec" type="number" min="10" max="1800" style="max-width:8rem;" />
+          </label>
+          <label>Release VRAM after (minutes idle, 0 = never)
+            <input id="comfyEjectMin" type="number" min="0" max="1440" style="max-width:8rem;" />
+          </label>
+          <label>Max images per turn (Code agent)
+            <input id="comfyMaxPerTurn" type="number" min="1" max="20" style="max-width:8rem;" />
+          </label>
+          <label>Save images to workspace subfolder (blank = workspace root)
+            <input id="comfyOutputDir" type="text" placeholder="assets" style="max-width:14rem;" />
+          </label>
+          <div class="inline-form">
+            <button type="button" id="saveComfyBtn" class="btn">Save ComfyUI settings</button>
+          </div>
+          <p id="comfySaveError" class="login-error hidden"></p>
+          <p class="settings-hint">The connection test and "Detect nodes" run against what's in the form; generation uses the <em>saved</em> settings.</p>
+        </div>
+      </div>
+
+      <div class="settings-tab-panel" data-tab-panel="jellyfin">
+        <div class="settings-section">
+          <h3>Jellyfin
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Connects Mission Control to your Jellyfin server so the dashboard's Board view can show what's playing and give you play / pause / skip. Make an API key in Jellyfin under Dashboard → API Keys and paste it here — it's stored on the host and never sent to a browser (only a "there's a key" flag is). Sending a transport command is activity-logged but not confirmed — it's just a media control.</span></button>
+          </h3>
+          <label>Server URL<input id="jellyfinBaseUrl" placeholder="http://192.168.1.20:8096" /></label>
+          <label>API key<input id="jellyfinApiKey" type="password" autocomplete="off" placeholder="paste a new key" /></label>
+          <p class="settings-hint" id="jellyfinKeyHint"></p>
+          <div class="inline-form">
+            <button type="button" id="saveJellyfinBtn" class="btn">Save</button>
+            <button type="button" id="testJellyfinBtn" class="btn ghost">Test connection</button>
+          </div>
+          <p id="jellyfinResult" class="settings-hint hidden"></p>
+          <p id="jellyfinSaveError" class="login-error hidden"></p>
+        </div>
+      </div>
+
+      <div class="settings-tab-panel" data-tab-panel="code">
+        <div class="settings-section">
+          <h3>Code workspace
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">A coding assistant with its own conversations, saved on the host and synced to every device. It uses the Ollama connection from the Ollama tab; the model is chosen per session in the Code view. The agent can read the workspace folder and — with your approval — write, edit and delete files in it. That's why it sits behind the password gate. Running commands is not built yet.</span></button>
+          </h3>
+          <label class="checkbox-row">
+            <input type="checkbox" id="codeEnabled" />
+            Enable the Code workspace
+          </label>
+          <p id="codeAuthWarning" class="login-error hidden">
+            Set a password (Security tab) first — the Code workspace can't be
+            turned on without password protection.
+          </p>
+        </div>
+        <div class="settings-section">
+          <h3>Working folder</h3>
+          <label>Folder path (on this host)
+            <input id="codeWorkspacePathInput" placeholder="blank = a 'code' folder inside your shared folder" />
+          </label>
+          <p class="settings-hint">Where the agent is allowed to work. Leave blank to use a <code>code</code> subfolder of your shared folder, or <code>./workspace</code> if sharing is off. An explicit path must already exist. When the folder is inside your shared folder, the Files tab browses it too.</p>
+        </div>
+        <div class="settings-section">
+          <h3>Workspace docs
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Two files in the workspace the agent reads at the start of <em>every</em> turn. The <strong>source-of-truth file</strong> (like <code>CLAUDE.md</code> / <code>AGENTS.md</code>) is yours — conventions, architecture, things to avoid — and treated as authoritative. The <strong>memory file</strong> is the agent's: it appends a line when it learns something worth carrying forward, and you can prune it. Each is capped at 16&nbsp;KB (about a quarter of a 16k context window), so keep them tight.</span></button>
+          </h3>
+          <label>Source-of-truth file
+            <input id="codeContextFileName" type="text" placeholder="AGENTS.md" style="max-width:14rem;" />
+          </label>
+          <label>Memory file
+            <input id="codeMemoryFileName" type="text" placeholder="AGENTS-memory.md" style="max-width:14rem;" />
+          </label>
+          <p class="settings-hint">File names (or workspace-relative paths) — <code>AGENTS.md</code> and <code>AGENTS-memory.md</code> by default. Leave either blank to turn it off. The memory file is created automatically the first time the agent runs.</p>
+        </div>
+        <div class="settings-section">
+          <h3>Approvals
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble"><strong>Ask each change</strong> — every write, edit or delete shows a diff with Confirm / Reject in the transcript. <strong>Auto-apply edits</strong> — writes and edits apply on their own (still shown as diffs); deletes still ask. <strong>Auto-apply all</strong> — nothing asks. This is the default for new sessions; each session can be switched in its header.</span></button>
+          </h3>
+          <label>Default approval mode for new sessions
+            <select id="codeDefaultApprovalMode" style="max-width:16rem;">
+              <option value="ask">Ask each change</option>
+              <option value="auto-edit">Auto-apply edits (ask before delete)</option>
+              <option value="auto-all">Auto-apply all</option>
+            </select>
+          </label>
+        </div>
+        <div class="settings-section">
+          <h3>Shell commands
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Lets the agent run shell commands (builds, tests, git, installs) with the workspace folder as the working directory. Off by default, and can't be turned on without password protection — this is the one Code feature that runs arbitrary commands on the host, the same as Service Control. Each command is confirmed in the transcript unless a session is set to "Auto-apply all". The command is not sandboxed beyond its working directory.</span></button>
+          </h3>
+          <label class="checkbox-row">
+            <input type="checkbox" id="codeAllowCommands" />
+            Let the agent run shell commands (with confirmation)
+          </label>
+          <p id="codeCommandsWarning" class="login-error hidden">
+            Set a password (Security tab) first — commands can't be enabled
+            without password protection.
+          </p>
+          <label>Command timeout (seconds)
+            <input id="codeCommandTimeoutSec" type="number" min="5" max="600" style="max-width:8rem;" />
+          </label>
+          <h3 style="margin-top:18px;">Command rules
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Patterns matched against a command before it runs. A <strong>never-run</strong> match is refused outright — even in "Auto-apply all" — and the agent is told not to route around it. An <strong>always-allow</strong> match runs with no Confirm card, even in "Ask each change". Anything matching neither falls back to the session's approval mode. Never-run wins over always-allow. One pattern per line; <code>*</code> matches any run of characters, <code>?</code> one; matching ignores case and extra spaces. The never-run list ships with catastrophic and outbound commands already in it — edit freely.</span></button>
+          </h3>
+          <label>Always allow (one pattern per line)
+            <textarea id="codeRulesAllow" rows="3" placeholder="npm test&#10;npm run *&#10;git status&#10;git log*&#10;ls*" style="width:100%;box-sizing:border-box;font-family:var(--mono,monospace);font-size:0.82rem;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);resize:vertical;"></textarea>
+          </label>
+          <label>Never run (one pattern per line)
+            <textarea id="codeRulesDeny" rows="4" placeholder="sudo *&#10;rm -rf /*&#10;git push*&#10;* | *sh" style="width:100%;box-sizing:border-box;font-family:var(--mono,monospace);font-size:0.82rem;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);resize:vertical;"></textarea>
+          </label>
+          <button type="button" id="codeRulesResetDeny" class="btn ghost" style="align-self:flex-start;">Restore the default never-run list</button>
+        </div>
+        <div class="settings-section">
+          <h3>Checks
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Verification commands the agent can run with the <code>run_checks</code> tool — syntax checks, a linter, your test script. It runs them after making changes and fixes what fails, and uses them when you ask it to review code. These are <em>your</em> commands (not the model's), so <code>run_checks</code> works without the shell-commands switch. Run with the workspace as the working directory.</span></button>
+          </h3>
+          <label>One per line, as <code>label: command</code>
+            <textarea id="codeChecks" rows="4" placeholder="syntax: git ls-files -m -o --exclude-standard '*.js' | xargs -r -n1 node --check&#10;test: npm test" style="width:100%;box-sizing:border-box;font-family:var(--mono,monospace);font-size:0.82rem;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);resize:vertical;"></textarea>
+          </label>
+          <label>Check timeout (seconds)
+            <input id="codeCheckTimeoutSec" type="number" min="5" max="1200" style="max-width:8rem;" />
+          </label>
+        </div>
+        <div class="settings-section">
+          <h3>Tools the agent may use
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">A small local model gets confused when too many tools are on offer and starts emitting broken tool calls — switching off the ones you don't need keeps it on track. The core file-reading tools (list files, read a file, read many) are always on and aren't listed. Some entries only reach the model when they're usable anyway: image generation needs ComfyUI on, and the background-command checks appear only once something is running.</span></button>
+          </h3>
+          <div id="codeToolList" class="code-tool-list"></div>
+        </div>
+        <div class="settings-section">
+          <h3>Model &amp; limits
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">The context window is Ollama's <code>num_ctx</code> — how much conversation and file content the agent holds at once. "Compact at" is when a long turn folds its earlier steps into a short summary so it doesn't overflow that window mid-task; lower means it compacts sooner and more often.</span></button>
+          </h3>
+          <label>Default model for new sessions
+            <div class="inline-form">
+              <select id="codeDefaultModel" style="flex:1;min-width:0;"></select>
+              <button type="button" id="refreshCodeModelsBtn" class="btn ghost" title="Reload the list from Ollama">↻</button>
+            </div>
+          </label>
+          <p id="codeModelsError" class="login-error hidden"></p>
+          <label>Context window (tokens)
+            <input id="codeContextTokens" type="number" min="2048" max="131072" step="1024" style="max-width:9rem;" />
+          </label>
+          <p class="settings-hint">How much conversation + file content the agent keeps in view (Ollama <code>num_ctx</code>). Bigger is more capable but uses more memory; 16384 is a sensible start. The meter in the session header shows how full it is.</p>
+          <label>Compact the turn at (% of context window)
+            <input id="codeCompactAtPercent" type="number" min="40" max="95" step="5" style="max-width:8rem;" />
+          </label>
+          <label>Max agent steps per turn
+            <input id="codeMaxSteps" type="number" min="3" max="40" style="max-width:8rem;" />
+          </label>
+          <label>Reply timeout (seconds)
+            <input id="codeTimeoutSec" type="number" min="10" max="1800" style="max-width:8rem;" />
+          </label>
+        </div>
+        <div class="settings-section">
+          <h3>Vision
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">When you attach an image to a Code message, this model describes it and the description is handed to whichever model is driving the session — so your coding model doesn't have to be multimodal itself. Pick a vision-capable model you've pulled (e.g. <code>qwen3-vl:4b</code>). Leave blank and attached images just get a "no vision model" note. On CPU/small-GPU this is slow — the timeout is per image.</span></button>
+          </h3>
+          <label>Vision model (the "eyes")
+            <div class="inline-form">
+              <select id="codeVisionModel" style="flex:1;min-width:0;"></select>
+              <button type="button" id="refreshCodeModelsBtn2" class="btn ghost" title="Reload the list from Ollama">↻</button>
+            </div>
+          </label>
+          <p id="codeVisionBadge" class="settings-hint"></p>
+          <label>Describe timeout (seconds, per image)
+            <input id="codeVisionTimeoutSec" type="number" min="30" max="600" step="10" style="max-width:8rem;" />
+          </label>
+          <div class="inline-form">
+            <button type="button" id="saveCodeBtn" class="btn">Save Code settings</button>
+          </div>
+          <p id="codeSaveError" class="login-error hidden"></p>
+        </div>
+      </div>
+
+      <div class="settings-tab-panel" data-tab-panel="snippets">
+        <div class="settings-section">
+          <h3>Snippets
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Shell commands you save once and run on this host with a button. Editing the list only needs a password; actually running one needs the switch below on as well — the same double lock Service Control uses, since a snippet runs whatever you saved as the Mission Control user. Each runs with the Code workspace as its working directory unless you set one. "Browse the catalog" has ready-made ones you can add or ignore.</span></button>
+          </h3>
+          <label class="checkbox-row">
+            <input type="checkbox" id="snippetRunnerEnabled" />
+            Allow snippets to run on this host
+          </label>
+          <p id="snippetRunnerAuthWarning" class="login-error hidden">
+            Set a password in the Security tab first — the runner can't be turned on without it.
+          </p>
+          <label>Run timeout (seconds)
+            <input id="snippetTimeoutSec" type="number" min="5" max="1200" style="max-width:8rem;" />
+          </label>
+          <div id="snippetList" class="snippet-list"></div>
+          <button type="button" id="addSnippetBtn" class="btn ghost" style="margin-top:6px;">+ Add a snippet</button>
+          <div class="inline-form" style="margin-top:12px;">
+            <button type="button" id="saveSnippetsBtn" class="btn">Save snippets</button>
+            <span id="snippetsSaveNote" class="settings-hint"></span>
+          </div>
+          <p id="snippetsError" class="login-error hidden"></p>
+        </div>
+        <div class="settings-section">
+          <h3>Catalog
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Ready-made entries you can add to your setup or leave alone. "Checks" go to the coding agent's run_checks list (Settings → Code); "Snippets" go to the list above. Nothing is added until you click Add.</span></button>
+          </h3>
+          <button type="button" id="toggleCatalogBtn" class="btn ghost">Browse the catalog</button>
+          <div id="snippetCatalog" class="snippet-catalog hidden"></div>
+        </div>
+      </div>
+
+      <div class="settings-tab-panel" data-tab-panel="scheduled">
+        <div class="settings-section">
+          <h3>Scheduled tasks
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Run a saved snippet, a Minecraft RCON command, or a service restart on a repeating schedule — a nightly backup, a morning "server's up" announcement. Times are the host's local clock. A task uses the same switch its manual version does: a snippet task needs the snippet runner on, a command or restart task needs Service Control on. If that switch is off when the task is due, the run is logged as skipped, not run. Timing is checked once a minute; a task that came due while the host was off runs shortly after it's back.</span></button>
+          </h3>
+          <div id="scheduleList" class="schedule-list"></div>
+          <button type="button" id="addScheduleBtn" class="btn ghost" style="margin-top:6px;">+ Add a task</button>
+          <div class="inline-form" style="margin-top:12px;">
+            <button type="button" id="saveSchedulesBtn" class="btn">Save tasks</button>
+            <span id="schedulesSaveNote" class="settings-hint"></span>
+          </div>
+          <p id="schedulesError" class="login-error hidden"></p>
         </div>
       </div>
 
@@ -574,6 +1250,65 @@
     </div>
   </div>
 
+  <!-- Game server console (creative roadmap Phase 5) -->
+  <div id="gameConsoleModal" class="modal hidden">
+    <div class="modal-card logs-card">
+      <div class="preview-header">
+        <span id="gameConsoleTitle"></span>
+        <div class="preview-header-actions">
+          <a id="gameTxAdminLink" class="icon-btn hidden" target="_blank" rel="noopener" title="Open txAdmin">↗</a>
+          <button type="button" id="gameConsoleClose" class="icon-btn" title="Close">✕</button>
+        </div>
+      </div>
+      <div id="gameServerInfo" class="game-server-info hidden"></div>
+      <div id="gamePlayers" class="game-players"></div>
+      <pre id="gameConsoleOutput" class="logs-output hidden"></pre>
+      <form id="gameConsoleForm" class="game-console-form hidden">
+        <input id="gameConsoleInput" placeholder="A command to run (e.g. say hello, time set day)" autocomplete="off" />
+        <button type="submit" class="btn">Send</button>
+      </form>
+      <p id="gameConsoleError" class="login-error hidden"></p>
+      <p class="settings-hint" id="gameConsoleHint"></p>
+    </div>
+  </div>
+
+  <!-- Code workspace file viewer -->
+  <div id="codeFileModal" class="modal hidden">
+    <div class="modal-card logs-card">
+      <div class="preview-header">
+        <span id="codeFileModalTitle"></span>
+        <div class="preview-header-actions">
+          <button type="button" id="closeCodeFileBtn" class="icon-btn" title="Close">✕</button>
+        </div>
+      </div>
+      <div id="codeFileContent" class="logs-output code-file-view"></div>
+      <p id="codeFileTruncated" class="settings-hint hidden">Showing the first part of a larger file — it's bigger than the viewer's limit.</p>
+    </div>
+  </div>
+
+  <!-- Edit channel modal -->
+  <div id="channelModal" class="modal hidden">
+    <div class="modal-card">
+      <h2>Edit channel</h2>
+      <form id="channelForm">
+        <label>Channel name<input name="name" type="text" maxlength="40" required /></label>
+        <div class="settings-section">
+          <h3>Assistant personality here
+            <button type="button" class="info-tip" aria-label="More info">ⓘ<span class="info-tip-bubble">Give the Ollama assistant a different name, face, or system prompt just in this channel. Leave a field blank to use the default from Settings → Ollama. The trigger word is always the global one.</span></button>
+          </h3>
+          <label>Bot name<input name="botName" type="text" maxlength="40" placeholder="(default)" /></label>
+          <label>Avatar emoji<input name="botEmoji" type="text" maxlength="8" placeholder="(default)" style="max-width:5rem;" /></label>
+          <label>System prompt<textarea name="systemPrompt" rows="4" placeholder="(uses the default from Settings → Ollama)" style="width:100%;box-sizing:border-box;font-family:inherit;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);resize:vertical;"></textarea></label>
+        </div>
+        <div class="modal-actions">
+          <div class="spacer"></div>
+          <button type="button" id="cancelChannelBtn" class="btn ghost">Cancel</button>
+          <button type="submit" class="btn primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Recently added files modal -->
   <div id="recentModal" class="modal hidden">
     <div class="modal-card">
@@ -624,6 +1359,17 @@
   </div>
 
   <div id="toast" class="toast hidden"></div>
+
+  <!-- Kiosk mode (ops roadmap Phase 2c) — shown only under body.kiosk-mode -->
+  <div id="kioskClock" class="kiosk-clock" aria-hidden="true">
+    <div class="kiosk-clock-time" id="kioskClockTime">--:--</div>
+    <div class="kiosk-clock-date" id="kioskClockDate"></div>
+  </div>
+  <div id="kioskDimOverlay" class="kiosk-dim-overlay" aria-hidden="true"></div>
+  <div id="kioskControls" class="kiosk-controls" aria-hidden="true">
+    <button type="button" id="kioskFsBtn" class="kiosk-btn" title="Toggle fullscreen">⛶</button>
+    <button type="button" id="kioskExitBtn" class="kiosk-btn" title="Exit kiosk mode (or press Esc)">✕</button>
+  </div>
 
   <script type="module" src="/js/app.js"></script>
 </body>

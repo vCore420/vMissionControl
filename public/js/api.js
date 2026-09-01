@@ -6,6 +6,23 @@
 // of the session cookie's own SameSite=Strict protection. See server/auth.js.
 const CSRF_HEADERS = { 'X-Mc-Request': '1' };
 
+// Stable per-browser id (Phase 11) — keys this device's profile (name +
+// avatar) server-side. Generated once, kept in localStorage. Sent on every
+// request so the profile routes know whose profile is whose.
+export function deviceId() {
+  let id = null;
+  try {
+    id = localStorage.getItem('mc:deviceId');
+    if (!id) {
+      id = (crypto.randomUUID?.() || `d-${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^a-zA-Z0-9_-]/g, '');
+      localStorage.setItem('mc:deviceId', id);
+    }
+  } catch {
+    id = id || 'anon';
+  }
+  return id;
+}
+
 // A 401 means the session is gone (never had one, or it expired) — every
 // call site would otherwise need its own "redirect to login" handling, so
 // it happens once here instead.
@@ -16,7 +33,7 @@ function handleAuthFailure() {
 }
 
 async function request(method, url, body) {
-  const opts = { method, headers: { ...CSRF_HEADERS } };
+  const opts = { method, headers: { ...CSRF_HEADERS, 'X-Mc-Device': deviceId() } };
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
@@ -35,6 +52,8 @@ async function request(method, url, body) {
 export const api = {
   getConfig: () => request('GET', '/api/config'),
   getStatus: () => request('GET', '/api/status'),
+  getActivity: (params) => request('GET', `/api/activity?${new URLSearchParams(params)}`),
+  getHostHistory: () => request('GET', '/api/host?history=1'),
 
   authStatus: () => request('GET', '/api/auth/status'),
   login: (password) => request('POST', '/api/auth/login', { password }),
@@ -53,7 +72,16 @@ export const api = {
   restartService: (id) => request('POST', `/api/services/${encodeURIComponent(id)}/restart`),
   getServiceLogs: (id, tail = 200) => request('GET', `/api/services/${encodeURIComponent(id)}/logs?tail=${tail}`),
   getDockerContainers: () => request('GET', '/api/docker/containers'),
+  // Board 'docker' widget (ops roadmap Phase 2b) — act on a raw container by
+  // name/id, not a service. start/stop/restart is Service-Control-gated
+  // server-side; logs is read-only.
+  dockerContainerAction: (name, action) =>
+    request('POST', `/api/docker/containers/${encodeURIComponent(name)}/${encodeURIComponent(action)}`),
+  getContainerLogs: (name, tail = 200) =>
+    request('GET', `/api/docker/containers/${encodeURIComponent(name)}/logs?tail=${tail}`),
   reorderServices: (ids) => request('PUT', '/api/services/reorder', { ids }),
+  gameServerStatus: (id) => request('GET', `/api/services/${encodeURIComponent(id)}/game/status`),
+  gameServerCommand: (id, command) => request('POST', `/api/services/${encodeURIComponent(id)}/game/command`, { command }),
 
   createGroup: (body) => request('POST', '/api/groups', body),
   updateGroup: (id, body) => request('PUT', `/api/groups/${encodeURIComponent(id)}`, body),
@@ -64,6 +92,103 @@ export const api = {
 
   updateSettings: (body) => request('PUT', '/api/settings', body),
   testAlert: () => request('POST', '/api/settings/test-alert'),
+
+  getOllamaModels: () => request('GET', '/api/ollama/models'),
+  getOllamaStatus: () => request('GET', '/api/ollama/status'),
+  setOllamaActive: (active) => request('POST', '/api/ollama/active', { active }),
+  testOllama: () => request('POST', '/api/ollama/test'),
+  decideOllamaAction: (id, decision) => request('POST', `/api/ollama/action/${encodeURIComponent(id)}`, { decision }),
+
+  getComfyStatus: () => request('GET', '/api/comfy/status'),
+  getComfyCheckpoints: () => request('GET', '/api/comfy/checkpoints'),
+  detectComfyWorkflow: (workflow) => request('POST', '/api/comfy/detect', { workflow }),
+
+  // ---------- Generated images (creative roadmap Phase 1) ----------
+  listWallpapers: () => request('GET', '/api/art/wallpapers'),
+  generateWallpaper: (themeId, extraPrompt) =>
+    request('POST', '/api/art/wallpapers', { themeId, extraPrompt }),
+  deleteWallpaper: (id) => request('DELETE', `/api/art/wallpapers/${encodeURIComponent(id)}`),
+  wallpaperImageUrl: (id) => `/api/art/wallpapers/${encodeURIComponent(id)}/image`,
+  generateAvatar: (prompt, style) => request('POST', '/api/art/avatar', { prompt, style }),
+  generateServiceIcon: (id, extraPrompt) =>
+    request('POST', `/api/art/service-icon/${encodeURIComponent(id)}`, { extraPrompt }),
+  deleteServiceIcon: (id) => request('DELETE', `/api/art/service-icon/${encodeURIComponent(id)}`),
+  serviceIconUrl: (id, v) => `/api/art/service-icon/${encodeURIComponent(id)}?v=${encodeURIComponent(v || '')}`,
+
+  // ---------- Snippets (creative roadmap Phase 2) ----------
+  getSnippets: () => request('GET', '/api/snippets'),
+  saveSnippets: (snippets, runner) => request('PUT', '/api/snippets', { snippets, runner }),
+  runSnippet: (id) => request('POST', `/api/snippets/${encodeURIComponent(id)}/run`),
+
+  // ---------- Scheduled tasks (ops roadmap Phase 4) ----------
+  getSchedules: () => request('GET', '/api/schedules'),
+  saveSchedules: (schedules) => request('PUT', '/api/schedules', { schedules }),
+  runSchedule: (id) => request('POST', `/api/schedules/${encodeURIComponent(id)}/run`),
+
+  // ---------- Board widgets (creative roadmap Phase 3) ----------
+  addWidget: (widget) => request('POST', '/api/widgets', widget),
+  updateWidget: (id, widget) => request('PUT', `/api/widgets/${encodeURIComponent(id)}`, widget),
+  deleteWidget: (id) => request('DELETE', `/api/widgets/${encodeURIComponent(id)}`),
+  reorderWidgets: (ids) => request('PUT', '/api/widgets/reorder', { ids }),
+  getWidgetValue: (id) => request('GET', `/api/widgets/${encodeURIComponent(id)}/value`),
+
+  // ---------- Jellyfin (creative roadmap Phase 4) ----------
+  getJellyfinStatus: () => request('GET', '/api/jellyfin/status'),
+  jellyfinNowPlaying: () => request('GET', '/api/jellyfin/now-playing'),
+  jellyfinCommand: (sessionId, command) => request('POST', '/api/jellyfin/command', { sessionId, command }),
+  jellyfinImageUrl: (itemId, tag) =>
+    `/api/jellyfin/image/${encodeURIComponent(itemId)}${tag ? `?tag=${encodeURIComponent(tag)}` : ''}`,
+
+  getCodeSessions: () => request('GET', '/api/code/sessions'),
+  createCodeSession: (body) => request('POST', '/api/code/sessions', body || {}),
+  updateCodeSession: (id, body) => request('PUT', `/api/code/sessions/${encodeURIComponent(id)}`, body),
+  deleteCodeSession: (id) => request('DELETE', `/api/code/sessions/${encodeURIComponent(id)}`),
+  getCodeMessages: (id) => request('GET', `/api/code/sessions/${encodeURIComponent(id)}/messages`),
+  sendCodeMessage: (id, body) => request('POST', `/api/code/sessions/${encodeURIComponent(id)}/messages`, body),
+  stopCodeTurn: (id) => request('POST', `/api/code/sessions/${encodeURIComponent(id)}/stop`),
+  decideCodeApproval: (id, approvalId, decision) =>
+    request('POST', `/api/code/sessions/${encodeURIComponent(id)}/approval/${encodeURIComponent(approvalId)}`, { decision }),
+  answerCodeQuestion: (id, questionId, answer) =>
+    request('POST', `/api/code/sessions/${encodeURIComponent(id)}/answer/${encodeURIComponent(questionId)}`, { answer }),
+  saveCodePlan: (id, messageId) =>
+    request('POST', `/api/code/sessions/${encodeURIComponent(id)}/save-plan`, { messageId }),
+  revertCodeTurn: (id, messageId) =>
+    request('POST', `/api/code/sessions/${encodeURIComponent(id)}/revert/${encodeURIComponent(messageId)}`),
+  getCodeWorkspace: (relPath) => request('GET', `/api/code/workspace?path=${encodeURIComponent(relPath || '')}`),
+  getCodeWorkspaceFiles: () => request('GET', '/api/code/workspace/files'),
+  getCodeCommands: () => request('GET', '/api/code/commands'),
+  getCodeWorkspaceFile: (relPath) => request('GET', `/api/code/workspace/file?path=${encodeURIComponent(relPath)}`),
+  codeWorkspaceImageUrl: (relPath) => `/api/code/workspace/raw?path=${encodeURIComponent(relPath)}`,
+  getCodeWorkspaceInfo: () => request('GET', '/api/code/workspace-info'),
+  createCodeContextFile: () => request('POST', '/api/code/workspace/context-file'),
+  getCodeModelInfo: (model) => request('GET', `/api/code/model-info?model=${encodeURIComponent(model || '')}`),
+  codeMessageImageUrl: (id, file) =>
+    `/api/code/sessions/${encodeURIComponent(id)}/image/${encodeURIComponent(file)}`,
+  getCodeTools: () => request('GET', '/api/code/tools'),
+  getCodeBackground: (id) => request('GET', `/api/code/sessions/${encodeURIComponent(id)}/background`),
+  stopCodeBackground: (bgId) => request('POST', `/api/code/background/${encodeURIComponent(bgId)}/stop`),
+
+  // ---------- Per-device profile (Phase 11) ----------
+  getMyProfile: () => request('GET', '/api/profile'),
+  getAllProfiles: () => request('GET', '/api/profile/all'),
+  updateProfile: (body) => request('PUT', '/api/profile', body),
+  removeProfileAvatar: () => request('DELETE', '/api/profile/avatar'),
+  uploadProfileAvatar: async (file) => {
+    const form = new FormData();
+    form.append('image', file);
+    const res = await fetch('/api/profile/avatar', {
+      method: 'POST',
+      headers: { ...CSRF_HEADERS, 'X-Mc-Device': deviceId() },
+      body: form,
+    });
+    if (res.status === 401) {
+      handleAuthFailure();
+      throw new Error('signed out — redirecting to login');
+    }
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || 'failed to upload the image');
+    return data;
+  },
 
   importConfig: (config) => request('POST', '/api/config/import', config),
 
@@ -78,6 +203,7 @@ export const api = {
 
   getChatChannels: () => request('GET', '/api/chat/channels'),
   createChatChannel: (name) => request('POST', '/api/chat/channels', { name }),
+  updateChatChannel: (id, body) => request('PUT', `/api/chat/channels/${encodeURIComponent(id)}`, body),
   deleteChatChannel: (id) => request('DELETE', `/api/chat/channels/${encodeURIComponent(id)}`),
   reorderChatChannels: (ids) => request('PUT', '/api/chat/channels/reorder', { ids }),
   getChatMessages: (channelId) => request('GET', `/api/chat/channels/${encodeURIComponent(channelId)}/messages`),
@@ -91,7 +217,7 @@ export const api = {
     if (file) form.append('file', file);
     const res = await fetch(`/api/chat/channels/${encodeURIComponent(channelId)}/messages`, {
       method: 'POST',
-      headers: { ...CSRF_HEADERS },
+      headers: { ...CSRF_HEADERS, 'X-Mc-Device': deviceId() },
       body: form,
     });
     if (res.status === 401) {

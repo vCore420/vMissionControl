@@ -1,15 +1,24 @@
 import { connectWebSocket } from './ws.js';
 import {
-  state, el, toast, callbacks, loadAll, pollStatus,
-  handleWsStatus, handleWsConfig, handleWsChatMessage, handleWsChatMessageDeleted, handleWsTimesheet,
+  state, el, toast, callbacks, loadAll, loadProfiles, pollStatus,
+  handleWsStatus, handleWsConfig, handleWsChatMessage, handleWsChatMessageUpdated,
+  handleWsChatMessageDeleted, handleWsTimesheet, handleWsProfile,
+  handleWsCodeSessions, handleWsCodeMessage, handleWsCodeMessageUpdated, handleWsCodeTurn, handleWsCodeBackground,
+  handleWsArtWallpapers, handleWsArtProgress, handleWsActivity,
 } from './core.js';
 import { renderGroupFilters, renderCards, renderOnlineBadge, renderCardStatuses } from './dashboard.js';
 import { renderFiles } from './files.js';
 import {
   renderChatBadge, renderChatChannels, renderChatMessages, switchChannel, renderDeviceNameLabel,
+  renderChatAiToggle, applyChatLayoutClasses,
 } from './chat.js';
-import { pollHostHealth } from './settings.js';
+import {
+  renderCodeSessions, renderCodeMessages, renderCodeTasks, renderCodeBackground, enterCodeView, applyCodeGate,
+} from './code.js';
+import { pollHostHealth, renderProfileSection, renderWallpaperSection } from './settings.js';
 import { renderTimesheet } from './timesheet.js';
+import { renderActivity } from './activity.js';
+import { initKiosk } from './kiosk.js';
 import './omnibox.js';
 
 // Entry point: registers the service worker, wires core.js's sync-engine
@@ -31,6 +40,7 @@ function render() {
   renderGroupFilters();
   renderCards();
   renderOnlineBadge();
+  renderChatAiToggle();
 }
 
 callbacks.render = render;
@@ -40,6 +50,14 @@ callbacks.renderChatChannels = renderChatChannels;
 callbacks.renderChatMessages = renderChatMessages;
 callbacks.switchChannel = switchChannel;
 callbacks.renderTimesheet = renderTimesheet;
+callbacks.renderCodeSessions = renderCodeSessions;
+callbacks.renderCodeMessages = renderCodeMessages;
+callbacks.renderCodeTasks = renderCodeTasks;
+callbacks.renderCodeBackground = renderCodeBackground;
+callbacks.applyCodeGate = applyCodeGate;
+callbacks.renderDeviceNameLabel = renderDeviceNameLabel;
+callbacks.renderProfileSection = renderProfileSection;
+callbacks.renderWallpaperSection = renderWallpaperSection;
 
 // ---------- View switching ----------
 
@@ -67,7 +85,9 @@ el('viewSwitch').addEventListener('click', (e) => {
       renderChatMessages();
     }
   }
+  if (view === 'code') enterCodeView();
   if (view === 'timesheet') renderTimesheet({ forceFetch: true });
+  if (view === 'activity') renderActivity();
 });
 
 // ---------- Render + boot ----------
@@ -75,9 +95,14 @@ el('viewSwitch').addEventListener('click', (e) => {
 renderDeviceNameLabel();
 el('dashboardLayoutSwitch').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.layout === state.dashboardViewMode));
 el('filesLayoutSwitch').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.layout === state.filesViewMode));
-el('chatLayout').className = `chat-layout mode-${state.chatViewMode}`;
+applyChatLayoutClasses();
 el('chatLayoutSwitch').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.layout === state.chatViewMode));
 loadAll().catch((err) => toast(err.message, true));
+loadProfiles();
+// After the layout switch is wired but before the poll loops — kiosk mode
+// forces the Board view and re-renders once config arrives from loadAll().
+// Guarded so a kiosk bug can never take the rest of the app's boot with it.
+try { initKiosk(); } catch (err) { console.error('[kiosk] init failed', err); }
 setInterval(pollStatus, 5000);
 pollHostHealth();
 setInterval(pollHostHealth, 10000);
@@ -85,6 +110,16 @@ connectWebSocket({
   status: handleWsStatus,
   config: handleWsConfig,
   chatMessage: handleWsChatMessage,
+  chatMessageUpdated: handleWsChatMessageUpdated,
   chatMessageDeleted: handleWsChatMessageDeleted,
   timesheet: handleWsTimesheet,
+  codeSessions: handleWsCodeSessions,
+  codeMessage: handleWsCodeMessage,
+  codeMessageUpdated: handleWsCodeMessageUpdated,
+  codeTurn: handleWsCodeTurn,
+  codeBackground: handleWsCodeBackground,
+  profile: handleWsProfile,
+  artWallpapers: handleWsArtWallpapers,
+  artProgress: handleWsArtProgress,
+  activity: handleWsActivity,
 });

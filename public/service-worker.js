@@ -26,7 +26,18 @@
 // where every device hits this service worker again to re-authenticate at
 // once. Now a request that hasn't resolved within FETCH_TIMEOUT_MS aborts
 // and falls back to cache like any other failure.
-const CACHE_NAME = 'mission-control-shell-v6';
+//
+// Auth interaction: when password protection is on, most SHELL_URLS are
+// gated and an unauthenticated request for one gets a 302 to /login.html.
+// A *redirected* response must never be cached — cache.put() throws on it,
+// and caching login.html under the "/" key would make the offline app
+// shell show the login page even for a signed-in device. So: install
+// tolerates individual URLs failing (Promise.allSettled, not addAll, which
+// used to reject the whole batch and cache nothing on a first
+// unauthenticated visit), and the fetch handler only caches a direct,
+// non-redirected 200. The gated files get cached on the first authenticated
+// load instead, which is the only time an offline shell is meaningful.
+const CACHE_NAME = 'mission-control-shell-v28';
 const FETCH_TIMEOUT_MS = 6000;
 const SHELL_URLS = [
   '/',
@@ -36,9 +47,15 @@ const SHELL_URLS = [
   '/js/dashboard.js',
   '/js/files.js',
   '/js/chat.js',
+  '/js/code.js',
+  '/js/markdown.js',
+  '/js/highlight.js',
   '/js/settings.js',
   '/js/omnibox.js',
   '/js/timesheet.js',
+  '/js/activity.js',
+  '/js/kiosk.js',
+  '/js/avatar.js',
   '/js/api.js',
   '/js/connections.js',
   '/js/ws.js',
@@ -48,7 +65,13 @@ const SHELL_URLS = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_URLS)));
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) =>
+      // Per-URL, not addAll: one gated URL 302-ing to /login.html (or any
+      // single fetch failing) must not throw away the whole precache.
+      Promise.allSettled(SHELL_URLS.map((url) => cache.add(url)))
+    )
+  );
   self.skipWaiting();
 });
 
@@ -68,9 +91,12 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
       .then((response) => {
-        if (response.ok) {
+        // Only a direct 200 gets cached — a redirected response (an auth
+        // gate sending an unauthenticated request to /login.html) both
+        // throws in cache.put() and would poison the "/" shell entry.
+        if (response.ok && !response.redirected) {
           const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone)).catch(() => {});
         }
         return response;
       })

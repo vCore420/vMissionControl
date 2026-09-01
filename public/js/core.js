@@ -1,4 +1,4 @@
-import { api } from './api.js';
+import { api, deviceId } from './api.js';
 
 // Shared application state, DOM/formatting helpers, the WebSocket/poll data
 // sync engine, and generic cross-view utilities (drag-reorder, info tips).
@@ -20,10 +20,27 @@ export const state = {
   filesPath: '',
   notificationsEnabled: localStorage.getItem('mc:notificationsEnabled') === 'true',
   theme: localStorage.getItem('mc:theme') || 'dark',
+  // Which generated wallpaper this device shows (creative roadmap Phase 1) —
+  // per-device like the theme, never synced. null = none. The <head> pre-paint
+  // script already applied it visually; this is the in-memory copy.
+  wallpaper: localStorage.getItem('mc:wallpaper') || null,
+  wallpapers: [], // the shared pool, kept current by the 'artWallpapers' broadcast
+  deviceId: deviceId(),
   deviceName: ensureDeviceName(),
+  myProfile: null,                 // { name, avatar } for this device (from the host)
+  profiles: new Map(),             // deviceId -> { name, avatar } for everyone, for message avatars
   activeChannelId: null,
   chatMessages: new Map(),
   chatUnseen: 0,
+  // Code tab — the session list is global (synced), which session this
+  // device has open and whether the panels are collapsed are per-device.
+  codeSessions: [],
+  codeMessages: new Map(),
+  activeCodeSessionId: localStorage.getItem('mc:codeSession') || null,
+  codeSidebarCollapsed: localStorage.getItem('mc:codeSidebarCollapsed') === 'true',
+  codeWorkspaceCollapsed: localStorage.getItem('mc:codeWorkspaceCollapsed') === 'true',
+  codeRunningSessions: new Set(), // sessions with a turn running right now (any device)
+  codeUnseenSessions: new Set(), // background sessions whose turn finished while unopened
   highlightedServiceId: null,
   revealedUrls: new Set(),
   revealedDeviceIps: new Set(),
@@ -36,7 +53,11 @@ export const state = {
   chatViewMode: ['tabs', 'sidebar', 'floating'].includes(localStorage.getItem('mc:chatView'))
     ? localStorage.getItem('mc:chatView')
     : 'tabs',
+  chatChannelsCollapsed: localStorage.getItem('mc:chatChannelsCollapsed') === 'true',
   settingsTab: localStorage.getItem('mc:settingsTab') || 'appearance',
+  // Activity view (ops roadmap Phase 1) — filter is per-device, not synced.
+  activityFilter: { category: null, hours: 24, search: '' },
+  activityEntries: [],
   // Populated on first visit to the Timesheets tab and kept current by the
   // 'timesheet' WS broadcast — the server is the one source of truth for
   // both, so there's no separate per-device copy the way chat messages
@@ -231,6 +252,20 @@ export function isLocalUrl(url) {
   }
 }
 
+// localStorage.setItem throws when the origin's storage quota is exhausted
+// (or when storage is disabled / partitioned in some browser privacy modes).
+// Every write through here is a remembered UI preference or a device-local
+// id — nice to keep, never worth throwing an uncaught exception that aborts
+// whatever interaction triggered it (a full quota was bricking the Settings
+// tab switcher). Best-effort: log once and carry on with the in-memory value.
+export function setLocal(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (err) {
+    console.warn(`[mc] couldn't persist "${key}" (${err.name || 'storage error'}) — this session keeps it in memory only`);
+  }
+}
+
 // Every device picks its own display name, stored locally — there's no
 // account system here, same trust-based model as the rest of the app.
 // Defined here (not chat.js) because `state` above needs it synchronously
@@ -239,7 +274,7 @@ export function ensureDeviceName() {
   let name = localStorage.getItem('mc:deviceName');
   if (!name) {
     name = `Guest-${Math.random().toString(36).slice(2, 6)}`;
-    localStorage.setItem('mc:deviceName', name);
+    setLocal('mc:deviceName', name);
   }
   return name;
 }
@@ -329,7 +364,20 @@ export const callbacks = {
   renderChatMessages: () => {},
   switchChannel: () => {},
   renderTimesheet: () => {},
+  renderCodeSessions: () => {},
+  renderCodeMessages: () => {},
+  renderCodeTasks: () => {},
+  renderCodeBackground: () => {},
+  applyCodeGate: () => {},
+  renderWallpaperSection: () => {},
+  onActivityEntry: () => {},
 };
+
+// Generated-image sampler progress (creative roadmap Phase 1). More than one
+// view cares — the wallpaper + avatar controls in Settings, the icon button
+// in the Service modal — so this is a listener Set, not a single callback.
+// Each listener filters on msg.kind. Populated by settings.js / dashboard.js.
+export const artProgressListeners = new Set();
 
 export function applyStatus(list) {
   for (const s of list) state.status.set(s.id, s);
@@ -352,6 +400,44 @@ export async function loadAll() {
   callbacks.render();
 }
 
+// Per-device profiles (Phase 11): everyone's for message avatars, plus this
+// device's own name — which becomes the source of truth for `deviceName`
+// (the localStorage value is only a first-run seed now).
+export async function loadProfiles() {
+  try {
+    const [{ profiles }, mine] = await Promise.all([api.getAllProfiles(), api.getMyProfile()]);
+    state.profiles = new Map(Object.entries(profiles || {}));
+    applyMyProfile(mine);
+  } catch {
+    // profiles are cosmetic — a failure here shouldn't block boot
+  }
+}
+
+function applyMyProfile(profile) {
+  state.myProfile = profile && (profile.name || profile.avatar) ? profile : null;
+  if (profile?.name) {
+    state.deviceName = profile.name;
+    setLocal('mc:deviceName', profile.name);
+  }
+  state.profiles.set(state.deviceId, {
+    name: state.deviceName,
+    avatar: profile?.avatar || null,
+  });
+  callbacks.renderDeviceNameLabel?.();
+  callbacks.renderProfileSection?.();
+  if (el('chatView').classList.contains('active')) callbacks.renderChatMessages?.();
+  if (el('codeView').classList.contains('active')) callbacks.renderCodeMessages?.();
+}
+
+// Someone (maybe this device, from another tab) changed their profile.
+export function handleWsProfile(msg) {
+  state.profiles.set(msg.deviceId, msg.profile);
+  if (msg.deviceId === state.deviceId) applyMyProfile(msg.profile);
+  callbacks.renderProfileSection?.();
+  if (el('chatView').classList.contains('active')) callbacks.renderChatMessages?.();
+  if (el('codeView').classList.contains('active')) callbacks.renderCodeMessages?.();
+}
+
 export async function pollStatus() {
   try {
     const status = await api.getStatus();
@@ -359,6 +445,47 @@ export async function pollStatus() {
   } catch {
     // transient network hiccup — next poll will retry
   }
+}
+
+// ---------- Wallpaper (creative roadmap Phase 1) ----------
+// Mirrors applyTheme in settings.js: set a CSS var + a class on <html>, save
+// the choice per-device. The <head> pre-paint script does the same thing on
+// load so there's no flash; this path is for a live pick/clear.
+export function applyWallpaper(id) {
+  const root = document.documentElement;
+  if (id) {
+    root.style.setProperty('--wallpaper-image', `url("${api.wallpaperImageUrl(id)}")`);
+    root.classList.add('has-wallpaper');
+  } else {
+    root.style.removeProperty('--wallpaper-image');
+    root.classList.remove('has-wallpaper');
+  }
+  state.wallpaper = id || null;
+  setLocal('mc:wallpaper', id || '');
+}
+
+// The pool changed (a device generated or deleted one). Keep our copy current
+// and, if this device's selected wallpaper was deleted elsewhere, fall back to
+// none so we're not pointing at a 404.
+export function handleWsArtWallpapers(msg) {
+  state.wallpapers = msg.wallpapers || [];
+  if (state.wallpaper && !state.wallpapers.some((w) => w.id === state.wallpaper)) {
+    applyWallpaper(null);
+  }
+  callbacks.renderWallpaperSection();
+}
+
+// Sampler progress for a generation this device kicked off — the server
+// broadcasts it to everyone, we only care about our own.
+export function handleWsArtProgress(msg) {
+  if (msg.deviceId && msg.deviceId !== state.deviceId) return;
+  for (const fn of artProgressListeners) fn(msg);
+}
+
+// Every logActivity() call, pushed live. The Activity view prepends it when
+// it matches the active filter; ignored otherwise (the next open re-fetches).
+export function handleWsActivity(msg) {
+  callbacks.onActivityEntry(msg.entry);
 }
 
 export function handleWsStatus(msg) {
@@ -371,14 +498,21 @@ export function handleWsConfig(msg) {
   callbacks.render();
 
   if (el('chatView').classList.contains('active')) {
-    const stillExists = (state.config.chatChannels || []).some((c) => c.id === state.activeChannelId);
-    if (!stillExists) {
+    const active = (state.config.chatChannels || []).find((c) => c.id === state.activeChannelId);
+    if (!active) {
       const first = (state.config.chatChannels || [])[0];
       if (first) callbacks.switchChannel(first.id);
     } else {
+      // A rename or a persona change to the current channel needs the tab
+      // list, the header title, and the bot avatars in the log all refreshed.
+      el('chatChannelTitle').textContent = active.name;
       callbacks.renderChatChannels();
+      callbacks.renderChatMessages();
     }
   }
+
+  // The Code feature may have been toggled on/off from another device.
+  if (el('codeView').classList.contains('active')) callbacks.applyCodeGate();
 }
 
 export function handleWsChatMessage(msg) {
@@ -398,6 +532,77 @@ export function handleWsChatMessageDeleted(msg) {
   state.chatMessages.set(msg.channelId, list.filter((m) => m.id !== msg.messageId));
   if (el('chatView').classList.contains('active') && state.activeChannelId === msg.channelId) {
     callbacks.renderChatMessages();
+  }
+}
+
+// An in-place edit of a message already in the channel — the Ollama
+// assistant swapping its "thinking…" placeholder for the finished reply.
+// Patches the cached copy by id; ignores it if this device never loaded
+// the channel (nothing on screen to update).
+export function handleWsChatMessageUpdated(msg) {
+  const list = state.chatMessages.get(msg.channelId);
+  if (!list) return;
+  const idx = list.findIndex((m) => m.id === msg.message.id);
+  if (idx === -1) return;
+  list[idx] = msg.message;
+  if (el('chatView').classList.contains('active') && state.activeChannelId === msg.channelId) {
+    callbacks.renderChatMessages();
+  }
+}
+
+// ---------- Code tab sync ----------
+// Mirrors the chat trio: the session list (metadata) is replaced wholesale on
+// any structural change; messages arrive one at a time and the agent's
+// streamed reply patches its own placeholder in place. State always updates so
+// a background tab is current when switched to; the DOM only re-renders when
+// the Code view is visible.
+
+export function handleWsCodeSessions(msg) {
+  state.codeSessions = msg.sessions;
+  if (el('codeView').classList.contains('active')) {
+    callbacks.renderCodeSessions();
+    callbacks.renderCodeTasks?.(); // the agent's task list rides the session meta
+  }
+}
+
+export function handleWsCodeMessage(msg) {
+  const list = state.codeMessages.get(msg.sessionId);
+  if (list) list.push(msg.message);
+  if (el('codeView').classList.contains('active') && state.activeCodeSessionId === msg.sessionId) {
+    callbacks.renderCodeMessages();
+  }
+}
+
+export function handleWsCodeMessageUpdated(msg) {
+  const list = state.codeMessages.get(msg.sessionId);
+  if (!list) return;
+  const idx = list.findIndex((m) => m.id === msg.message.id);
+  if (idx === -1) list.push(msg.message);
+  else list[idx] = msg.message;
+  if (el('codeView').classList.contains('active') && state.activeCodeSessionId === msg.sessionId) {
+    callbacks.renderCodeMessages();
+  }
+}
+
+// A turn started/finished in some session (this device's or another's). Drives
+// the sidebar "working" spinner and the "finished while you were away" dot.
+export function handleWsCodeTurn(msg) {
+  if (msg.running) {
+    state.codeRunningSessions.add(msg.sessionId);
+    state.codeUnseenSessions.delete(msg.sessionId);
+  } else {
+    state.codeRunningSessions.delete(msg.sessionId);
+    if (state.activeCodeSessionId !== msg.sessionId) state.codeUnseenSessions.add(msg.sessionId);
+  }
+  if (el('codeView').classList.contains('active')) callbacks.renderCodeSessions();
+}
+
+// A background command (Code parity roadmap 2a) started, produced output, or
+// exited — for this device's session or another's. The strip refetches its
+// own list; only re-render when the Code view is showing the same session.
+export function handleWsCodeBackground(msg) {
+  if (el('codeView').classList.contains('active') && state.activeCodeSessionId === msg.sessionId) {
+    callbacks.renderCodeBackground();
   }
 }
 

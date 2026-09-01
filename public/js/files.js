@@ -1,5 +1,5 @@
 import { api } from './api.js';
-import { state, el, toast, escapeHtml, escapeAttr, formatSize, timeAgo } from './core.js';
+import { state, el, toast, escapeHtml, escapeAttr, formatSize, timeAgo, setLocal } from './core.js';
 
 // Shared-folder file browser: List/Thumbnail/Tree views, breadcrumbs,
 // rename/move (drag or the rename button), whole-share search, upload
@@ -379,7 +379,7 @@ el('filesLayoutSwitch').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-layout]');
   if (!btn) return;
   state.filesViewMode = btn.dataset.layout;
-  localStorage.setItem('mc:filesView', state.filesViewMode);
+  setLocal('mc:filesView', state.filesViewMode);
   el('filesLayoutSwitch').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
   renderFiles();
 });
@@ -556,7 +556,7 @@ async function openRecentModal() {
       btn.addEventListener('click', () => {
         const itemPath = btn.dataset.path;
         state.filesPath = itemPath.includes('/') ? itemPath.slice(0, itemPath.lastIndexOf('/')) : '';
-        if (state.filesViewMode === 'tree') { state.filesViewMode = 'list'; localStorage.setItem('mc:filesView', 'list'); }
+        if (state.filesViewMode === 'tree') { state.filesViewMode = 'list'; setLocal('mc:filesView', 'list'); }
         closeRecentModal();
         el('filesLayoutSwitch').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.layout === state.filesViewMode));
         setFilesLayoutVisibility(state.filesViewMode);

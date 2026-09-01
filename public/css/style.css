@@ -370,9 +370,66 @@ body {
   min-height: 100vh;
 }
 
+/* Generated wallpaper (creative roadmap Phase 1). When one is picked, <html>
+   gets .has-wallpaper (set pre-paint in index.html, and by core.js#applyWallpaper
+   on a live change). Two fixed layers paint in the root stacking context's
+   negative-z band — below all page content, above the root background:
+   ::before is the image, ::after a --bg veil that keeps cards/text readable
+   and adapts to the theme for free. body's own opaque background is dropped
+   to transparent so the layers show through. */
+:root { background: var(--bg); }
+:root.has-wallpaper body { background: transparent; }
+:root.has-wallpaper::before,
+:root.has-wallpaper::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+:root.has-wallpaper::before {
+  z-index: -2;
+  background-image: var(--wallpaper-image, none);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+:root.has-wallpaper::after {
+  z-index: -1;
+  background: var(--bg);
+  opacity: 0.72;
+}
+
 button, input, select {
   font-family: inherit;
   color: inherit;
+}
+
+/* A dark-themed app on a browser whose native form widgets assume a light
+   one: give every <select> and its <option> popup explicit colours so the
+   list is readable when open (the popup ignores the closed control's style
+   and, on Windows especially, defaults to dark-on-light). Components that
+   want a different closed-state background still set their own. */
+select {
+  background: var(--bg-card);
+  color: var(--text);
+}
+option {
+  background: var(--bg-card);
+  color: var(--text);
+}
+
+/* iOS Safari zooms the whole page in when you focus a text field whose text
+   is under 16px, and it never zooms back out on its own. On touch devices,
+   force every text-entry control to 16px so that never fires — !important
+   because it has to beat the per-component sizing the dense desktop panels
+   use (and which is fine there, since desktop doesn't focus-zoom). Checkbox/
+   radio/range/color have no typed text and are left alone. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
 }
 
 /* ---------- Hero header ---------- */
@@ -1450,6 +1507,41 @@ button, input, select {
   margin: 12px 0 0;
 }
 
+/* Game server console (creative roadmap Phase 5) */
+.game-server-info {
+  margin-top: 10px;
+  font-size: 0.8rem;
+  color: var(--text-faint);
+}
+.game-players {
+  margin-top: 10px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+.game-player em { color: var(--text-faint); font-style: normal; font-size: 0.9em; }
+.game-players-off { color: var(--offline); }
+.game-player {
+  display: inline-block;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin: 2px 2px 0 0;
+  font-size: 0.76rem;
+  color: var(--text);
+}
+#gameConsoleOutput { min-height: 90px; max-height: 45vh; }
+.game-console-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.game-console-form input {
+  flex: 1;
+  min-width: 0;
+  font-family: monospace;
+}
+
 .preview-nav {
   display: flex;
   align-items: center;
@@ -1608,6 +1700,35 @@ button, input, select {
   color: white;
 }
 
+.chat-channel-tab .edit-channel-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+.chat-channel-tab .edit-channel-btn:hover {
+  background: var(--accent);
+  color: white;
+}
+
+/* Small mark on a channel tab that carries its own assistant personality. */
+.channel-persona-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+  margin-left: 2px;
+}
+
 .chat-channel-tab.add-channel {
   border-style: dashed;
   cursor: pointer;
@@ -1729,6 +1850,31 @@ button, input, select {
   gap: 8px;
 }
 
+.chat-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Channel-column collapse toggle — only meaningful (and only shown) in the
+   two side-by-side layouts; in Tabs the channels are the bar up top. */
+.chat-channels-toggle {
+  display: none;
+  width: 32px;
+  height: 32px;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+.chat-layout.mode-sidebar .chat-channels-toggle,
+.chat-layout.mode-floating .chat-channels-toggle {
+  display: inline-flex;
+}
+.chat-layout.mode-sidebar.channels-collapsed .chat-channels,
+.chat-layout.mode-floating.channels-collapsed .chat-channels {
+  display: none;
+}
+
 .chat-identity {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -1742,6 +1888,29 @@ button, input, select {
 }
 
 .chat-identity:hover { border-color: var(--accent); }
+
+/* The Ollama assistant on/off switch — same pill idiom as .chat-identity,
+   with an accent-filled "on" state matching how .view-switch / .layout-switch
+   mark their active button. */
+.chat-ai-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.chat-ai-toggle:hover:not(:disabled) { border-color: var(--accent); }
+.chat-ai-toggle:disabled { opacity: 0.55; cursor: default; }
+.chat-ai-toggle.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.chat-ai-toggle.warn { border-color: var(--offline); color: var(--offline); }
+.chat-ai-toggle-face { font-size: 0.9rem; line-height: 1; }
 
 .chat-messages {
   max-height: 50vh;
@@ -1769,6 +1938,46 @@ button, input, select {
   font-size: 0.85rem;
 }
 
+/* ---------- Profile avatars (Phase 11) ---------- */
+/* One circular container; the sprite <svg> or uploaded <img> fills it.
+   Sized small in message meta, large in the Profile tab. */
+.mc-avatar {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--bg-elevated);
+}
+.mc-avatar img,
+.mc-avatar svg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* In bubble mode your own name is hidden — your own face too. */
+.chat-messages.mode-bubbles .chat-message.own .mc-avatar { display: none; }
+
+.profile-avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 4px 0 10px;
+}
+.profile-avatar-preview .mc-avatar {
+  width: 72px;
+  height: 72px;
+}
+.profile-avatar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.profile-avatar-actions .btn { text-align: left; }
+
 .chat-message-time {
   font-size: 0.72rem;
   color: var(--text-faint);
@@ -1795,6 +2004,131 @@ button, input, select {
 }
 
 .chat-message-text a { color: var(--accent); }
+
+/* Ollama assistant messages — its name in the accent colour, a "thinking"
+   line with three bouncing dots while it generates, an offline-tinted body
+   if the reply failed. */
+.chat-message.bot .chat-message-author { color: var(--accent); }
+.chat-message.error .chat-message-text { color: var(--offline); }
+
+/* Footnote on a reply that consulted live data (see ollamaTools.js). */
+.chat-tools-used {
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+
+/* Confirm/Cancel card for an action the assistant wants to take
+   (ollamaActions.js). Nothing runs until Confirm is pressed. */
+.chat-action-card {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  max-width: 100%;
+}
+.chat-action-card.done { border-color: var(--online); }
+.chat-action-card.failed { border-color: var(--offline); }
+.chat-action-card.cancelled,
+.chat-action-card.expired { border-color: var(--border); opacity: 0.7; }
+.chat-action-summary { font-size: 0.88rem; font-weight: 600; }
+.chat-action-state { display: block; margin-top: 4px; font-size: 0.78rem; color: var(--text-dim); }
+.chat-action-state.ok { color: var(--online); }
+.chat-action-state.fail { color: var(--offline); }
+.chat-action-buttons { display: flex; gap: 8px; margin-top: 10px; }
+.chat-action-buttons .btn { padding: 6px 14px; font-size: 0.8rem; }
+
+/* Rendered Markdown in an assistant reply (markdown.js). The container
+   drops the pre-wrap that plain messages use — block spacing now comes
+   from the real <p>/<ul>/<pre> elements — while <pre> keeps its own. */
+.chat-message-text.md { white-space: normal; }
+.chat-message-text.md > :first-child { margin-top: 0; }
+.chat-message-text.md > :last-child { margin-bottom: 0; }
+.chat-message-text.md p { margin: 6px 0; }
+.chat-message-text.md ul,
+.chat-message-text.md ol { margin: 6px 0; padding-left: 22px; }
+.chat-message-text.md li { margin: 2px 0; }
+.chat-message-text.md h3,
+.chat-message-text.md h4,
+.chat-message-text.md h5,
+.chat-message-text.md h6 { font-size: 0.92rem; font-weight: 700; margin: 10px 0 4px; }
+.chat-message-text.md blockquote {
+  margin: 6px 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--border);
+  color: var(--text-dim);
+}
+.chat-message-text.md hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+.chat-message-text code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+.chat-message-text :not(pre) > code {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5px 4px;
+}
+.chat-message-text pre {
+  margin: 6px 0;
+  padding: 10px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.chat-message-text pre code { display: block; white-space: pre; }
+
+/* A long unbreakable line inside a code block would otherwise force the
+   whole bubble wider than its 75% cap (and the message list past the
+   viewport). min-width:0 lets the flex item actually shrink so the <pre>'s
+   own overflow-x:auto takes over. */
+.chat-message,
+.chat-message-text { min-width: 0; }
+.chat-messages.mode-bubbles .chat-message-text { max-width: 100%; }
+
+.chat-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.9rem;
+  font-style: italic;
+  color: var(--text-dim);
+}
+.thinking-dots { display: inline-flex; gap: 3px; }
+.thinking-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: thinking-bounce 1.2s infinite ease-in-out both;
+}
+.thinking-dots i:nth-child(2) { animation-delay: 0.15s; }
+.thinking-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes thinking-bounce {
+  0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}
+.chat-messages.mode-bubbles .chat-thinking {
+  padding: 8px 12px;
+  border-radius: 16px;
+  border-bottom-left-radius: 4px;
+  background: var(--bg-elevated);
+}
+
+/* Blinking cursor tacked onto a reply that's still streaming in. */
+.stream-cursor {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: stream-blink 1s steps(1) infinite;
+}
+@keyframes stream-blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
 
 /* ---------- Chat: bubbles layout ---------- */
 
@@ -1902,6 +2236,7 @@ button, input, select {
 
 .chat-composer-row textarea {
   flex: 1;
+  height: 40px;
   min-height: 40px;
   max-height: 140px;
   resize: vertical;
@@ -1912,6 +2247,1008 @@ button, input, select {
   color: var(--text);
   font-family: inherit;
   font-size: 0.9rem;
+  line-height: 1.3;
+}
+
+/* The 📎 and Send buttons match the text box's resting height so the row
+   reads as one control; align-self keeps them pinned to the bottom edge
+   if the box is dragged taller. */
+.chat-composer-row .icon-btn,
+.chat-composer-row .btn {
+  height: 40px;
+  flex-shrink: 0;
+  align-self: flex-end;
+}
+.chat-composer-row .icon-btn { width: 40px; }
+
+/* ---------- Code view ---------- */
+/* A coding-assistant conversation per session (server/codeStore.js), laid out
+   like an agent IDE: session list | transcript + composer | a read-only view
+   of the workspace folder the agent will eventually work in. Assistant
+   message bodies reuse chat's .chat-message-text.md styling rather than
+   duplicating the Markdown/code-block rules. */
+
+.code-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 240px;
+  gap: 14px;
+  max-width: 1200px;
+  margin: 0 auto;
+  align-items: stretch;
+  height: calc(100vh - 210px);
+  min-height: 460px;
+}
+
+/* A collapsed panel is display:none, so it leaves the grid entirely — the
+   track count must match the *visible* items or the remaining ones land in
+   the wrong tracks (the bug where hiding the session list squeezed the
+   conversation to 0 and hid its own toggle). */
+.code-layout.sidebar-collapsed { grid-template-columns: minmax(0, 1fr) 240px; }
+.code-layout.sidebar-collapsed .code-sidebar { display: none; }
+
+.code-sidebar,
+.code-workspace {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.code-sidebar-header,
+.code-workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+.code-workspace-actions {
+  display: inline-flex;
+  gap: 4px;
+}
+.code-workspace-actions .icon-btn {
+  width: 30px;
+  height: 26px;
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.code-session-list { overflow-y: auto; padding: 6px; flex: 1; }
+
+.code-session {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 8px;
+  padding: 2px;
+}
+.code-session:hover { background: var(--bg-elevated); }
+.code-session.active { background: var(--bg-card-hover); }
+
+.code-session-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: transparent;
+  border: none;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text);
+  text-align: left;
+}
+.code-session-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.code-session-meta { font-size: 0.7rem; color: var(--text-faint); }
+
+/* Sidebar "working" spinner (turn running) and "finished while you were away"
+   dot — both sit before the title. The dot also bolds the whole row. */
+.code-session-spinner,
+.code-session-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.code-session-spinner {
+  border: 1.5px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: code-session-spin 0.7s linear infinite;
+}
+.code-session-dot {
+  border-radius: 50%;
+  background: var(--accent);
+}
+.code-session.unseen .code-session-title { font-weight: 700; color: var(--text); }
+@keyframes code-session-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .code-session-spinner { animation: none; border-top-color: var(--accent); }
+}
+
+.code-session-rename,
+.code-session-delete {
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 0.72rem;
+  padding: 4px;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.code-session:hover .code-session-rename,
+.code-session:hover .code-session-delete { opacity: 1; }
+.code-session-rename:hover { color: var(--accent); }
+.code-session-delete:hover { color: var(--offline); }
+
+.code-sidebar-empty,
+.code-ws-empty { padding: 12px; font-size: 0.78rem; color: var(--text-faint); }
+
+.code-main {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.code-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.code-header-id { display: inline-flex; flex-shrink: 0; color: var(--accent); }
+.code-header-id:empty { display: none; }
+#codeSessionTitle {
+  font-weight: 700;
+  font-size: 0.88rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.code-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+#codeModelSelect,
+#codeApprovalSelect {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 6px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.74rem;
+  max-width: 170px;
+}
+
+/* Plan-mode toggle in the code header, and the save-plan button on a reply */
+.code-plan-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.74rem;
+  color: var(--text-dim);
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.code-plan-toggle.on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+}
+.code-plan-toggle input { margin: 0; }
+.code-save-plan {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  padding: 4px 12px;
+}
+
+/* Per-turn revert (Code parity roadmap 2c) — the button on the newest
+   checkpoint, and the muted note left behind once a turn is rolled back. */
+.code-revert-btn {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  padding: 4px 12px;
+}
+.code-revert-note {
+  margin-top: 8px;
+  font-size: 0.74rem;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+/* Context meter — a slim pill with a fill bar, next to the model picker. */
+.code-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.code-context-bar {
+  width: 34px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.code-context-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+.code-context.warn { color: #e5a663; border-color: rgba(229, 166, 99, 0.5); }
+.code-context.warn .code-context-bar > span { background: #e5a663; }
+.code-context.danger { color: var(--offline); border-color: var(--offline); }
+.code-context.danger .code-context-bar > span { background: var(--offline); }
+
+/* ---------- The assistant's avatar (public/js/code.js#codeAvatar) ---------- */
+.code-avatar { flex-shrink: 0; overflow: visible; }
+.code-avatar .ca-head { fill: var(--bg-card); stroke: currentColor; stroke-width: 1.5; }
+.code-avatar .ca-eye { fill: currentColor; transform-box: fill-box; transform-origin: center; }
+.code-avatar .ca-mouth { stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; fill: none; }
+.code-avatar .ca-antenna { stroke: currentColor; stroke-width: 1.3; }
+.code-avatar .ca-antenna-tip { fill: currentColor; transform-box: fill-box; transform-origin: center; }
+.code-message.assistant .code-message-meta { align-items: center; }
+
+@keyframes ca-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
+@keyframes ca-blink { 0%, 90%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.12); } }
+@keyframes ca-scan {
+  0%, 100% { transform: translateX(-1.4px); }
+  50% { transform: translateX(1.4px); }
+}
+@keyframes ca-pulse { from { opacity: 0.35; transform: scale(0.75); } to { opacity: 1; transform: scale(1.35); } }
+
+.code-avatar.mood-idle { animation: ca-bob 4.5s ease-in-out infinite; }
+.code-avatar.mood-idle .ca-eye-l { animation: ca-blink 6s infinite; }
+.code-avatar.mood-idle .ca-eye-r { animation: ca-blink 6s infinite 0.08s; }
+.code-avatar.mood-thinking .ca-eye { animation: ca-scan 1.1s ease-in-out infinite; }
+.code-avatar.mood-thinking .ca-antenna-tip { animation: ca-pulse 0.8s ease-in-out infinite alternate; }
+.code-avatar.mood-error { color: var(--offline); }
+
+/* ---------- Empty-state example chips ---------- */
+.code-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.code-empty p { margin: 0; }
+.code-example-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.code-example-chips button {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 14px;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.code-example-chips button:hover { border-color: var(--accent); color: var(--text); }
+
+@media (prefers-reduced-motion: reduce) {
+  .code-avatar,
+  .code-avatar * { animation: none !important; }
+}
+
+.code-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+#codeView .empty-state { text-align: center; }
+
+/* Agent task list (Code parity roadmap 1a) — sits between the header and the
+   transcript, a live view of the plan the agent is working. */
+.code-tasks {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  padding: 8px 14px 10px;
+  flex-shrink: 0;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+.code-tasks-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.code-tasks-toggle {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: 0;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.code-tasks-toggle::before { content: '▾ '; }
+.code-tasks.collapsed .code-tasks-toggle::before { content: '▸ '; }
+.code-tasks.collapsed .code-tasks-list { display: none; }
+.code-tasks-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.code-task {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+.code-task-mark { flex-shrink: 0; width: 1em; text-align: center; color: var(--text-faint); }
+.code-task-text { min-width: 0; }
+.code-task.done .code-task-text { color: var(--text-faint); text-decoration: line-through; }
+.code-task.done .code-task-mark { color: var(--online); }
+.code-task.active .code-task-text { color: var(--text); font-weight: 600; }
+.code-task.active .code-task-mark { color: var(--accent); }
+.code-task.pending .code-task-text { color: var(--text-dim); }
+
+/* Running-processes strip (Code parity roadmap 2a) — background shell commands
+   the agent started, shown just above the composer with a per-row Stop. */
+.code-background {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+  padding: 8px 14px;
+  max-height: 22vh;
+  overflow-y: auto;
+}
+.code-background-head {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.code-background-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.code-bg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+}
+.code-bg-cmd {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+}
+.code-bg-state {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.code-bg-state.running {
+  color: var(--accent);
+  font-weight: 600;
+}
+.code-bg-stop {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.code-message-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.code-message-author { font-weight: 700; font-size: 0.82rem; }
+.code-message.assistant .code-message-author { color: var(--accent); }
+.code-message-time { font-size: 0.7rem; color: var(--text-faint); }
+.code-message .chat-message-text { white-space: pre-wrap; word-break: break-word; }
+.code-message.error .chat-message-text { color: var(--offline); }
+
+/* The agent's tool calls this turn — a muted list above its reply. */
+.code-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+.code-step {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  border-left: 2px solid var(--border);
+  padding: 2px 0 2px 10px;
+}
+.code-step-compact {
+  border-left: 0;
+  color: var(--text-faint);
+  font-size: 0.74rem;
+  font-style: italic;
+  text-align: center;
+  border-top: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
+  padding: 4px 0;
+  margin: 3px 0;
+}
+.code-step code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+  background: var(--bg-elevated);
+  padding: 0 4px;
+  border-radius: 4px;
+  color: var(--text);
+}
+details.code-step > summary {
+  cursor: pointer;
+  list-style: none;
+}
+details.code-step > summary::-webkit-details-marker { display: none; }
+details.code-step > summary::before {
+  content: '▸ ';
+  color: var(--text-faint);
+}
+details.code-step[open] > summary::before { content: '▾ '; }
+details.code-step > pre {
+  margin: 6px 0 2px;
+  padding: 8px 10px;
+  background: var(--bg-elevated);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  overflow-x: auto;
+  max-height: 260px;
+  white-space: pre;
+  color: var(--text-dim);
+}
+
+/* Write-step status marks + colours */
+.code-step-applied { color: var(--online); }
+.code-step-failed { color: var(--offline); }
+.code-step-rejected,
+.code-step-cancelled,
+.code-step-expired { color: var(--text-faint); text-decoration: line-through; }
+
+/* A write held for Confirm / Reject — diff shown open, not collapsed. */
+.code-step-approval {
+  border-left: 2px solid var(--accent);
+  background: var(--bg-elevated);
+  border-radius: 0 8px 8px 0;
+  padding: 8px 10px;
+  margin: 4px 0;
+}
+.code-step-head { font-size: 0.8rem; color: var(--text); margin-bottom: 6px; }
+.code-step-buttons { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.code-step-buttons .btn { padding: 4px 14px; font-size: 0.8rem; }
+
+/* ask_user — a question card, same shape as the approval card */
+.code-step-question {
+  border-left: 2px solid var(--accent);
+  background: var(--bg-elevated);
+  border-radius: 0 8px 8px 0;
+  padding: 8px 10px;
+  margin: 4px 0;
+}
+.code-q-row { display: flex; gap: 8px; margin-top: 8px; }
+.code-q-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 5px 10px;
+  color: var(--text);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.code-q-row .btn { padding: 5px 14px; font-size: 0.8rem; }
+.code-q-answer { color: var(--accent); }
+
+/* generate_image — a live progress note, then the result thumbnails */
+.code-step-progress {
+  font-size: 0.78rem;
+  color: var(--text-faint);
+}
+.code-step-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.code-step-image {
+  max-width: 220px;
+  max-height: 220px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  display: block;
+}
+
+/* Coloured unified diff */
+.code-diff {
+  margin: 4px 0 2px;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.74rem;
+  line-height: 1.5;
+  overflow-x: auto;
+  max-height: 320px;
+  white-space: pre;
+}
+.code-diff span { display: block; min-height: 1.5em; }
+.code-diff .diff-add { background: rgba(46, 204, 113, 0.16); color: var(--text); }
+.code-diff .diff-del { background: rgba(231, 76, 60, 0.16); color: var(--text); }
+.code-diff .diff-hunk { color: var(--accent); opacity: 0.85; }
+.code-diff .diff-ctx { color: var(--text-dim); }
+
+/* Clickable file:line references in the transcript (Code parity roadmap 3a). */
+.code-path-ref {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: none;
+  border-bottom: 1px dotted currentColor;
+}
+.code-path-ref:hover,
+.code-path-ref:focus-visible {
+  background: var(--bg-card-hover);
+  outline: none;
+}
+
+/* Workspace file viewer, line-numbered (3a — jump to a path:line). Each line
+   is its own row so a line is scrollable-to and can be flagged. */
+.code-file-view {
+  white-space: normal;
+  word-break: normal;
+  padding: 8px 0;
+  overflow-x: auto;
+}
+.code-file-line {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 0 12px;
+  min-height: 1.4em;
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
+}
+.code-file-line.hl { background: var(--bg-card-hover); box-shadow: inset 3px 0 0 var(--accent); }
+.code-file-ln {
+  flex: 0 0 auto;
+  width: 3ch;
+  text-align: right;
+  color: var(--text-faint);
+  user-select: none;
+}
+.code-file-src { white-space: pre; tab-size: 2; }
+
+/* Syntax highlighting (public/js/highlight.js) — token spans in fenced code
+   blocks (chat + Code replies) and the Code workspace file viewer. Fixed
+   colours rather than per-theme tokens; they read on both light and dark. */
+.tok-comment { color: var(--text-faint); font-style: italic; }
+.tok-string { color: #98c379; }
+.tok-number { color: #e5a663; }
+.tok-keyword { color: var(--accent); font-weight: 600; }
+.tok-fn { color: #61afef; }
+.tok-key { color: #61afef; }
+.tok-variable { color: #e5a663; }
+.tok-selector { color: var(--accent); }
+.tok-tag { color: #98c379; }
+.tok-heading { color: var(--text); font-weight: 700; }
+.tok-punct { color: var(--text-dim); }
+[data-theme="light"] .tok-string,
+[data-theme="cute"] .tok-string,
+[data-theme="solarized"] .tok-string { color: #2a7d3a; }
+[data-theme="light"] .tok-fn,
+[data-theme="light"] .tok-key,
+[data-theme="cute"] .tok-fn,
+[data-theme="cute"] .tok-key,
+[data-theme="solarized"] .tok-fn,
+[data-theme="solarized"] .tok-key { color: #2a6fb0; }
+[data-theme="light"] .tok-number,
+[data-theme="cute"] .tok-number,
+[data-theme="solarized"] .tok-number { color: #b05a1a; }
+
+/* The Code workspace file viewer — line-numbered, syntax-highlighted (3a). */
+#codeFileContent {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.code-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+.code-composer.drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
+  background: var(--accent-dim);
+}
+.code-composer-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+#codeAttachBtn { flex-shrink: 0; align-self: flex-end; }
+
+/* Staged attachments above the composer + the same chip in the transcript. */
+.code-attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.code-msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 2px;
+}
+.code-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 4px 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  font-size: 0.72rem;
+  color: var(--text);
+}
+.code-msg-attachments .code-attach-chip { padding: 3px 10px; }
+.code-attach-chip.skipped { color: var(--text-dim); border-style: dashed; }
+.code-attach-name {
+  min-width: 3ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.code-attach-size { flex-shrink: 0; color: var(--text-faint); }
+.code-attach-x {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  line-height: 1;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+.code-attach-x:hover { background: var(--border); color: var(--text); }
+.code-mention-x {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  line-height: 1;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+.code-mention-x:hover { background: var(--border); color: var(--text); }
+
+/* Image attachments (Code parity roadmap 4b) — staged chips with a thumbnail
+   in the composer, full thumbnails in the transcript. */
+#codeImageBtn { flex-shrink: 0; align-self: flex-end; }
+.code-image-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.code-image-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 4px 3px 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  font-size: 0.72rem;
+  color: var(--text);
+}
+.code-image-thumb {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+.code-image-x {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  line-height: 1;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+.code-image-x:hover { background: var(--border); color: var(--text); }
+.code-msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 2px;
+}
+.code-msg-image img {
+  max-width: 260px;
+  max-height: 200px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: block;
+}
+
+/* @file mention picker + staged row (Code parity roadmap 3a). */
+.code-mention-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.code-msg-attachments .code-mention-chip[data-path] { cursor: pointer; }
+.code-msg-attachments .code-mention-chip[data-path]:hover { border-color: var(--accent); }
+#codeMentionBtn,
+#codeCommandBtn { flex-shrink: 0; align-self: flex-end; font-weight: 700; }
+.code-mention-picker {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+.code-mention-opt {
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  padding: 6px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.code-mention-opt.active,
+.code-mention-opt:hover { background: var(--bg-card-hover); }
+.code-mention-empty {
+  padding: 8px 12px;
+  font-size: 0.76rem;
+  color: var(--text-faint);
+}
+
+/* /command picker rows + the transcript badge (Code parity roadmap 3b). */
+.code-command-opt {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+.code-command-name { color: var(--accent); font-weight: 600; flex-shrink: 0; }
+.code-command-desc {
+  color: var(--text-dim);
+  font-family: var(--font, inherit);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.code-command-src {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: 0.9em;
+}
+.code-msg-command {
+  display: inline-block;
+  margin: 2px 0 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  font-size: 0.72rem;
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.code-composer textarea {
+  flex: 1;
+  resize: vertical;
+  min-height: 40px;
+  max-height: 200px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  box-sizing: border-box;
+}
+.code-composer textarea:focus { outline: none; border-color: var(--accent); }
+.code-composer .btn { height: 40px; flex-shrink: 0; align-self: flex-end; }
+
+.code-workspace-path {
+  padding: 8px 12px;
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  word-break: break-all;
+  border-bottom: 1px solid var(--border);
+}
+.code-workspace-tree { overflow-y: auto; padding: 6px; flex: 1; }
+.code-ws-node { display: block; }
+.code-ws-children { display: block; }
+.code-ws-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 4px 8px 4px calc(8px + var(--depth, 0) * 13px);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.8rem;
+  color: var(--text);
+  text-align: left;
+}
+.code-ws-item:hover { background: var(--bg-elevated); }
+.code-ws-caret {
+  flex-shrink: 0;
+  width: 12px;
+  font-size: 0.65rem;
+  color: var(--text-faint);
+  text-align: center;
+}
+.code-ws-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.code-ws-item[data-type="dir"] .code-ws-name { font-weight: 500; }
+
+/* The two prompt docs (the source-of-truth + memory files, AGENTS.md /
+   AGENTS-memory.md by default) — read every turn, so marked in the tree the
+   way an overridden chat channel gets a persona dot. */
+.code-ws-item.is-prompt-doc .code-ws-name { color: var(--accent); }
+.code-ws-doc {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 0.62rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0.85;
+}
+.code-ws-doc.memory { color: var(--text-dim); }
+/* "No source-of-truth file yet — create one" prompt above the tree. */
+.code-ctx-prompt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 8px 6px;
+  padding: 7px 9px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+.code-ctx-prompt button {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  font: inherit;
+  font-size: 0.72rem;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.code-ctx-prompt button:hover { background: var(--accent); color: #fff; }
+.code-ctx-prompt button:disabled { opacity: 0.5; cursor: default; }
+
+/* Collapse toggles: sidebar (existing) + the workspace panel (Phase 5).
+   Track count always matches the visible items (see .sidebar-collapsed). */
+.code-layout.workspace-collapsed { grid-template-columns: 220px minmax(0, 1fr); }
+.code-layout.workspace-collapsed.sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
+.code-layout.workspace-collapsed .code-workspace { display: none; }
+
+@media (max-width: 1000px) {
+  .code-layout,
+  .code-layout.sidebar-collapsed,
+  .code-layout.workspace-collapsed,
+  .code-layout.sidebar-collapsed.workspace-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .code-sidebar { max-height: 200px; }
+  .code-workspace { max-height: 40vh; }
+  .code-main { min-height: 55vh; }
+  .code-layout.sidebar-collapsed .code-sidebar,
+  .code-layout.workspace-collapsed .code-workspace { display: none; }
+
+  /* Tablet: the nav (6 tabs) + the dashboard controls (search, Connections,
+     Discover) + the quick-launch hint don't fit one row much under ~1040px —
+     search got crushed toward 0 and the buttons ran off the right edge. Let
+     the toolbar wrap so the controls drop to their own row, left-aligned
+     (margin-left:auto only makes sense while they share the nav's row), with
+     search back at full width. The ≤720px block refines this further for
+     phones (icon-only buttons, nav wraps too). */
+  .toolbar { flex-wrap: wrap; row-gap: 10px; }
+  .toolbar-dashboard-controls { margin-left: 0; }
 }
 
 /* ---------- Modals ---------- */
@@ -2104,6 +3441,22 @@ button, input, select {
 }
 
 .checkbox-row input { width: auto !important; }
+
+/* Settings → Code "tools the agent may use" checklist (Code parity 2a). */
+.code-tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.code-tool-list .checkbox-row { font-size: 0.88rem; }
+.code-tool-list code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82em;
+  color: var(--text-dim);
+  background: var(--bg-elevated);
+  padding: 0 4px;
+  border-radius: 4px;
+}
 
 fieldset {
   border: 1px solid var(--border);
@@ -2313,6 +3666,20 @@ legend {
   padding: 8px 10px;
 }
 
+/* Settings inputs + textareas sit inside a <label> that's --text-dim and
+   inherit it via the base `input { color: inherit }` — near-invisible on the
+   dark themes. Force the real text colour + field background. (<select> is
+   handled globally above, including its <option> popup.) */
+.settings-tab-panel input,
+.settings-tab-panel textarea {
+  color: var(--text);
+  background: var(--bg-card);
+}
+.settings-tab-panel input::placeholder,
+.settings-tab-panel textarea::placeholder {
+  color: var(--text-faint);
+}
+
 .theme-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
@@ -2398,6 +3765,861 @@ legend {
   cursor: pointer;
   flex-shrink: 0;
 }
+
+/* Wallpaper picker (creative roadmap Phase 1) — a gallery of generated
+   backdrops plus a "None" tile, laid out like the theme grid. */
+.wallpaper-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.wallpaper-tile {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  padding: 0;
+  background: var(--bg-card);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 0.72rem;
+}
+
+.wallpaper-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.wallpaper-tile:hover { border-color: var(--accent); }
+
+.wallpaper-tile.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
+.wallpaper-none {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wallpaper-del {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.wallpaper-tile:hover .wallpaper-del { opacity: 1; }
+
+.wallpaper-generate {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wallpaper-generate input[type="text"] { flex: 1; min-width: 180px; }
+
+.wallpaper-progress {
+  margin-top: 10px;
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+
+/* Avatar generation (Phase 1b) — under the sprite/upload actions in the
+   profile section. */
+.avatar-generate {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.avatar-generate input[type="text"] { width: 100%; }
+
+.avatar-style-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.avatar-style-chip {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  font-size: 0.74rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.avatar-style-chip:hover { border-color: var(--accent); }
+
+.avatar-style-chip.active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--text);
+}
+
+/* Service-icon generation (Phase 1b) — inside the Add/Edit Service modal,
+   right after the emoji field. */
+.service-icon-generate {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin: 6px 0 4px;
+  padding: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.service-icon-preview {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated);
+}
+
+.service-icon-preview img { width: 100%; height: 100%; object-fit: cover; }
+
+.service-icon-preview-empty {
+  font-size: 0.62rem;
+  color: var(--text-faint);
+  text-align: center;
+  padding: 4px;
+}
+
+.service-icon-gen-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.service-icon-gen-actions input[type="text"] { width: 100%; }
+
+/* Snippets tab (creative roadmap Phase 2) — a saved list of shell commands
+   with Run buttons, plus the collapsible catalog. */
+.snippet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0 4px;
+}
+
+.snippet-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.snippet-row-fields {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.snippet-row-fields input { flex: 1 1 200px; min-width: 0; }
+
+.snippet-command {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--mono, monospace);
+  font-size: 0.82rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text);
+  resize: vertical;
+}
+
+.snippet-row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.snippet-output {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--online);
+  border-radius: 6px;
+  font-family: var(--mono, monospace);
+  font-size: 0.76rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.snippet-output.bad { border-left-color: var(--offline); }
+
+/* Scheduled tasks (ops roadmap Phase 4) */
+.schedule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0 4px;
+}
+.schedule-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.schedule-row-top {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.schedule-row-top .schedule-label { flex: 1 1 160px; min-width: 0; }
+.schedule-enabled { flex: 0 0 auto; white-space: nowrap; }
+.schedule-row-when { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.schedule-row-when .schedule-when { flex: 1 1 260px; min-width: 0; font-family: var(--mono, monospace); font-size: 0.82rem; }
+.schedule-when-ok { font-size: 0.78rem; color: var(--online); white-space: nowrap; }
+.schedule-when-bad { font-size: 0.78rem; color: var(--offline); }
+.schedule-row-action {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.schedule-row-action select,
+.schedule-row-action input { flex: 1 1 160px; min-width: 0; }
+.schedule-action-type { flex: 0 0 auto !important; }
+.schedule-gate-note { font-size: 0.78rem; color: var(--checking); }
+.schedule-last {
+  font-size: 0.78rem;
+  font-family: var(--mono, monospace);
+  color: var(--text-dim);
+  border-left: 3px solid var(--online);
+  padding-left: 8px;
+  word-break: break-word;
+}
+.schedule-last.bad { border-left-color: var(--offline); color: var(--text); }
+
+.snippet-catalog {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.snippet-catalog-heading {
+  margin: 8px 0 2px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.snippet-catalog-entry {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+}
+
+.snippet-catalog-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.snippet-catalog-label { font-size: 0.85rem; font-weight: 600; }
+.snippet-catalog-desc { font-size: 0.76rem; color: var(--text-dim); }
+
+.snippet-catalog-cmd {
+  font-family: var(--mono, monospace);
+  font-size: 0.74rem;
+  color: var(--text-faint);
+  background: var(--bg-elevated);
+  padding: 2px 6px;
+  border-radius: 4px;
+  align-self: flex-start;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.snippet-plat {
+  font-size: 0.68rem;
+  color: var(--checking);
+  border: 1px solid var(--checking);
+  border-radius: 999px;
+  padding: 0 6px;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+.snippet-catalog-add { flex-shrink: 0; }
+
+/* ---------- Activity view (ops roadmap Phase 1) ---------- */
+.activity-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.activity-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.activity-cat {
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-dim);
+  font-size: 0.74rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+.activity-cat:hover { border-color: var(--accent); }
+.activity-cat.active { border-color: var(--accent); background: var(--accent-dim); color: var(--text); }
+
+.activity-controls { display: flex; gap: 8px; flex-shrink: 0; }
+.activity-controls select,
+.activity-controls input { font-size: 0.82rem; }
+
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.activity-row {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 9px 14px;
+  font-size: 0.85rem;
+}
+.activity-row:nth-child(even) { background: var(--bg-card); }
+
+.activity-badge {
+  justify-self: start;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+.activity-badge.b-danger  { color: var(--offline); }
+.activity-badge.b-accent  { color: var(--accent); }
+.activity-badge.b-health  { color: var(--online); }
+.activity-badge.b-content { color: var(--checking); }
+.activity-badge.b-muted   { color: var(--text-faint); }
+
+.activity-msg { color: var(--text); word-break: break-word; }
+.activity-meta {
+  color: var(--text-faint);
+  font-size: 0.76rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-foot { margin-top: 14px; text-align: center; }
+
+@media (max-width: 560px) {
+  .activity-row { grid-template-columns: 1fr; gap: 3px; }
+  .activity-meta { white-space: normal; }
+}
+
+/* ---------- Board view (creative roadmap Phase 3) ---------- */
+.board-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.board-widget {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.board-widget.dragging { opacity: 0.5; }
+.board-widget.size-md { grid-column: span 2; }
+.board-widget.size-lg { grid-column: 1 / -1; }
+
+@media (max-width: 640px) {
+  .board-widget.size-md,
+  .board-widget.size-lg { grid-column: auto; }
+}
+
+.board-widget-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: grab;
+}
+
+.board-widget-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.board-widget-edit {
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 2px 4px;
+}
+.board-widget-edit:hover { color: var(--accent); }
+
+.board-widget-body { min-height: 0; }
+
+.board-widget-frame {
+  width: 100%;
+  border: 0;
+  display: block;
+  background: #fff;
+}
+
+.board-widget-note {
+  padding: 12px 14px;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+.board-widget-note :first-child { margin-top: 0; }
+.board-widget-note :last-child { margin-bottom: 0; }
+
+.board-widget-links {
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+}
+.board-widget-links a {
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+.board-widget-links a:hover { background: var(--bg-card-hover); color: var(--accent); }
+.board-widget-empty,
+.board-widget-links .board-widget-empty { padding: 10px 12px; color: var(--text-faint); font-size: 0.8rem; }
+
+.board-widget-value {
+  padding: 18px 16px;
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text);
+  word-break: break-word;
+  font-variant-numeric: tabular-nums;
+}
+.board-widget-value.is-error {
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--offline);
+}
+
+/* Jellyfin now-playing widget (Phase 4) */
+.board-widget-jellyfin { padding: 4px; }
+
+.board-widget-jf-empty {
+  padding: 22px 14px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 0.85rem;
+}
+
+.board-widget-jf-session {
+  display: flex;
+  gap: 10px;
+  padding: 8px;
+}
+.board-widget-jf-session + .board-widget-jf-session { border-top: 1px solid var(--border); }
+
+.board-widget-jf-poster {
+  width: 52px;
+  height: 78px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+  background: var(--bg-elevated);
+}
+
+.board-widget-jf-info { flex: 1; min-width: 0; }
+
+.board-widget-jf-title {
+  font-weight: 600;
+  font-size: 0.88rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.board-widget-jf-sub,
+.board-widget-jf-meta {
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.board-widget-jf-meta { color: var(--text-faint); }
+
+.board-widget-jf-bar {
+  height: 4px;
+  background: var(--bg-elevated);
+  border-radius: 2px;
+  margin: 6px 0 3px;
+  overflow: hidden;
+}
+.board-widget-jf-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.board-widget-jf-time {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.board-widget-jf-controls {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+.board-widget-jf-controls button {
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 3px 9px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  line-height: 1;
+}
+.board-widget-jf-controls button:hover { border-color: var(--accent); color: var(--accent); }
+.board-widget-jf-controls button:disabled { opacity: 0.4; cursor: default; }
+
+/* Host-stats widget (ops roadmap Phase 2) */
+.board-widget-hoststats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+}
+.hoststat-row {
+  display: grid;
+  grid-template-columns: 3.4rem 1fr 2.6rem;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+}
+.hoststat-row.mid { color: var(--checking); }
+.hoststat-row.high { color: var(--offline); }
+.hoststat-label { font-size: 0.75rem; }
+.hoststat-pct {
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.hoststat-row.mid .hoststat-pct { color: var(--checking); }
+.hoststat-row.high .hoststat-pct { color: var(--offline); }
+.mini-spark {
+  width: 100%;
+  height: 22px;
+  display: block;
+  opacity: 0.8;
+}
+
+/* Service-status widget (ops roadmap Phase 2) */
+.board-widget-svcstatus {
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+}
+.svcstatus-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+}
+.svcstatus-row + .svcstatus-row { border-top: 1px solid var(--border); }
+.svcstatus-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svcstatus-text { color: var(--text-faint); font-size: 0.75rem; flex-shrink: 0; }
+
+/* Clock widget (ops roadmap Phase 2) */
+.board-widget-clock {
+  padding: 18px 16px;
+  text-align: center;
+}
+.clock-time {
+  font-size: 2.1rem;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.clock-date { font-size: 0.85rem; color: var(--text-dim); margin-top: 4px; }
+.clock-zone { font-size: 0.72rem; color: var(--text-faint); margin-top: 2px; }
+
+/* Countdown widget (ops roadmap Phase 2) */
+.board-widget-countdown {
+  padding: 18px 16px;
+  text-align: center;
+}
+.countdown-label { font-size: 0.8rem; color: var(--text-dim); margin-bottom: 4px; }
+.countdown-big {
+  font-size: 1.9rem;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.countdown-sub { font-size: 0.72rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
+
+/* Photo widget (ops roadmap Phase 2b) */
+.board-widget-photo {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+.board-widget-photo .board-widget-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px;
+}
+.photo-frame {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-position: center;
+  animation: photo-fade 0.6s ease;
+}
+.photo-frame.fit-cover { object-fit: cover; }
+.photo-frame.fit-contain { object-fit: contain; }
+@keyframes photo-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .photo-frame { animation: none; } }
+
+/* Docker widget (ops roadmap Phase 2b) */
+.board-widget-docker {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+.docker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 0.82rem;
+}
+.docker-row + .docker-row { border-top: 1px solid var(--border); }
+.docker-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono, monospace);
+}
+.docker-actions { display: flex; gap: 3px; flex-shrink: 0; }
+.docker-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.docker-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.docker-btn:disabled { opacity: 0.35; cursor: default; }
+
+.board-empty {
+  text-align: center;
+  color: var(--text-faint);
+  padding: 40px 20px;
+  font-size: 0.9rem;
+}
+
+.board-add-btn { margin-top: 14px; }
+
+/* ---------- Kiosk mode (ops roadmap Phase 2c) ---------- */
+/* The clock / dim overlay / controls sit in the DOM always; nothing shows
+   until body.kiosk-mode. */
+.kiosk-clock,
+.kiosk-dim-overlay,
+.kiosk-controls { display: none; }
+
+body.kiosk-mode .hero,
+body.kiosk-mode .toolbar,
+body.kiosk-mode .dashboard-toolbar,
+body.kiosk-mode .fab,
+body.kiosk-mode #addWidgetBtn,
+body.kiosk-mode #enterKioskBtn,
+body.kiosk-mode .board-widget-edit { display: none !important; }
+
+body.kiosk-mode { overflow: hidden; }
+body.kiosk-mode .view { padding: 20px 22px; }
+body.kiosk-mode #dashboardView { padding-top: 84px; } /* room for the clock */
+body.kiosk-mode .board-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
+body.kiosk-mode .board-widget-head { cursor: default; }
+
+body.kiosk-mode .kiosk-clock {
+  display: block;
+  position: fixed;
+  top: 20px;
+  right: 28px;
+  text-align: right;
+  z-index: 9997;
+  opacity: 0.9;
+  pointer-events: none;
+}
+.kiosk-clock-time {
+  font-size: 2.7rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.kiosk-clock-date {
+  font-size: 0.95rem;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+body.kiosk-mode .kiosk-dim-overlay {
+  display: block;
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 1.5s ease;
+  z-index: 9998;
+}
+body.kiosk-mode.kiosk-dimmed .kiosk-dim-overlay {
+  opacity: 0.93;
+  pointer-events: auto;
+}
+
+body.kiosk-mode .kiosk-controls {
+  display: flex;
+  gap: 8px;
+  position: fixed;
+  bottom: 18px;
+  right: 22px;
+  z-index: 9999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+body.kiosk-mode.kiosk-controls-shown .kiosk-controls {
+  opacity: 1;
+  pointer-events: auto;
+}
+.kiosk-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.kiosk-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  body.kiosk-mode .kiosk-dim-overlay,
+  body.kiosk-mode .kiosk-controls { transition: none; }
+}
+
+/* Widget modal — the repeating link rows */
+.widget-links-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.widget-link-row {
+  display: flex;
+  gap: 6px;
+}
+.widget-link-label { flex: 0 0 30%; min-width: 0; }
+.widget-link-url { flex: 1; min-width: 0; }
+.widget-link-remove { flex-shrink: 0; padding: 4px 10px; }
 
 .groups-list {
   display: flex;
@@ -2790,20 +5012,63 @@ legend {
 }
 .ts-type-select { max-width: 160px; min-height: 34px; padding: 6px 8px; font-size: 0.78rem; }
 
-/* Collapsed-row summary + chevron, and the Settings accordion toggle —
-   invisible here so desktop keeps every row/card fully expanded exactly as
-   before this existed. Given real content and shown only inside the mobile
-   media query below, where every .ts-day-row starts collapsed except
-   today's (see timesheet.js's expandedRows) and .ts-card[data-role=
-   "settings-card"] starts collapsed outright — a phone lands on a short,
-   scannable week view instead of 14 open forms under a settings block. */
-.ts-row-summary-hours,
-.ts-row-chevron,
+/* Collapsible week rows + the Settings accordion — at every width. Without
+   this the page is a wall of 14 fully-open day forms under an always-open
+   settings block; with it you land on a short, scannable list (today's row
+   open, the Settings form and every other day one click away — the toggle
+   state lives in timesheet.js's expandedRows / toggleRowExpanded /
+   bindSettingsToggle, which run regardless of viewport). This was
+   mobile-only; the wall-of-forms problem reads the same on a desktop
+   screen, so it's promoted here. The mobile media query below keeps only
+   the phone-specific bits (full-width expanded fields, tighter type). */
 .ts-settings-toggle {
-  display: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
 }
+.ts-settings-toggle h2 { margin: 0; font-size: 1.05rem; }
+.ts-settings-body { display: none; }
+[data-role="settings-card"].ts-open .ts-settings-toggle { margin-bottom: 14px; }
+[data-role="settings-card"].ts-open .ts-settings-body { display: block; }
+[data-role="settings-card"].ts-open [data-role="settings-chevron"] { transform: rotate(180deg); }
 
-.ts-day-row-fields { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ts-day-row-top { cursor: pointer; }
+.ts-row-summary-hours {
+  display: block;
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.ts-row-chevron {
+  display: block;
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  margin-left: 4px;
+  transition: transform 0.15s ease;
+}
+.ts-type-select { display: none; }
+.ts-day-row.ts-expanded .ts-row-summary-hours { display: none; }
+.ts-day-row.ts-expanded .ts-type-select { display: block; }
+.ts-day-row.ts-expanded .ts-row-chevron { transform: rotate(180deg); }
+
+/* display lives on the two rules below (none by default, flex once the row
+   has .ts-expanded) so it wins the cascade over this layout-only rule; the
+   flex props here apply whenever it's the flex one that's showing. */
+.ts-day-row-fields { align-items: center; gap: 12px; flex-wrap: wrap; }
+.ts-day-row:not(.ts-expanded) .ts-day-row-fields { display: none; }
+.ts-day-row.ts-expanded .ts-day-row-fields { display: flex; }
 .ts-time-fields { display: flex; gap: 10px; flex-wrap: wrap; flex: 1 1 auto; }
 .ts-time-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 0.68rem; color: var(--text-dim); flex: 1 1 84px; }
 .ts-time-fields select { min-height: 36px; font-size: 0.82rem; padding: 6px 8px; }
@@ -3093,6 +5358,17 @@ legend {
     transform: translateX(-50%) translateY(0);
   }
 
+  /* ...and the "40-60% across" is not universal — an info-tip at the end of
+     a longer label (the assistant-actions one on Settings → Ollama sits
+     ~85% across) still centres a bubble that runs off the card's right
+     edge. Even hidden (visibility:hidden, but still laid out), that bubble
+     alone gave the whole settings modal a phantom horizontal scroll on a
+     phone. Clip at the card: on mobile the card is ~viewport-width so this
+     just trims a bubble that would have overflowed the screen anyway, and
+     `clip` (unlike `hidden`) doesn't turn the card into a scroll box or
+     touch the vertical axis. */
+  .modal-card { overflow-x: clip; }
+
   /* Graph view: the radius formula (renderServicesGraphView, dashboard.js)
      already shrinks with the container's actual width, but the node
      footprint below was a fixed size regardless of viewport — on a real
@@ -3120,70 +5396,101 @@ legend {
     opacity: 0.8;
   }
 
-  /* Timesheets: a wall of 14 fully-open day rows under a settings form was
-     the actual "hard to understand up front" problem — collapsing both
-     (today's row stays open; the Settings card starts closed; everything
-     else is a tap away — see timesheet.js's expandedRows/toggleRowExpanded
-     and bindSettingsToggle) turns the page into a short, scannable list
-     instead. Every rule in this block only exists in here, and the
-     elements it shows are display:none outside it (the base .ts-row-
-     summary-hours/.ts-row-chevron/.ts-settings-toggle rule above) — so
-     none of it can reach desktop, which stays exactly as it was. */
-
-  .ts-settings-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    background: none;
-    border: none;
-    padding: 0;
-    margin: 0;
-    color: var(--text);
-    cursor: pointer;
-    font-family: inherit;
-  }
-  .ts-settings-toggle h2 { margin: 0; font-size: 0.95rem; }
-  .ts-settings-body { display: none; }
-  [data-role="settings-card"].ts-open .ts-settings-toggle { margin-bottom: 14px; }
-  [data-role="settings-card"].ts-open .ts-settings-body { display: block; }
-  [data-role="settings-card"].ts-open [data-role="settings-chevron"] { transform: rotate(180deg); }
-
-  /* Collapsed (default): one line — day/date, hours, chevron. The type
-     select and the full editing row only render once tapped open, same
-     "drop to its own full-width row instead of squeezing onto one" fix as
-     everywhere else on mobile, just gated behind .ts-expanded now instead
-     of being unconditional. */
-  .ts-day-row-top { flex-wrap: wrap; cursor: pointer; }
-  .ts-row-summary-hours {
-    display: block;
-    margin-left: auto;
-    flex-shrink: 0;
-    font-family: var(--font-mono);
-    font-size: 0.72rem;
-    color: var(--text-dim);
-    white-space: nowrap;
-  }
-  .ts-row-chevron {
-    display: block;
-    flex-shrink: 0;
-    font-size: 0.7rem;
-    color: var(--text-faint);
-    margin-left: 2px;
-    transition: transform 0.15s ease;
-  }
-  .ts-type-select,
-  .ts-day-row-fields {
-    display: none;
-  }
-  .ts-day-row.ts-expanded .ts-row-summary-hours { display: none; }
-  .ts-day-row.ts-expanded .ts-type-select { display: block; max-width: none; width: 100%; }
-  .ts-day-row.ts-expanded .ts-day-row-fields { display: flex; }
-  .ts-day-row.ts-expanded .ts-row-chevron { transform: rotate(180deg); }
-
+  /* Timesheets — phone-only tweaks on top of the collapsible rows + Settings
+     accordion, which now live at every width (see the .ts-settings-toggle /
+     .ts-day-row.ts-expanded rules up near .ts-day-row). On a phone the
+     expanded editing row goes full-width instead of inline, the type select
+     and hours badge fill the row, and the smaller heading fits. */
+  .ts-settings-toggle h2 { font-size: 0.95rem; }
+  .ts-row-summary-hours { font-size: 0.72rem; }
+  .ts-day-row.ts-expanded .ts-type-select { max-width: none; width: 100%; }
   .ts-time-fields label { flex: 1 1 90px; }
   .ts-hours-badge { margin-left: 0; width: 100%; text-align: center; }
   .ts-export-actions .btn { flex: 1 1 100%; }
+
+  /* ---------- Code view ----------
+     The session sidebar + workspace panel already stack below the
+     conversation at ≤1000px. On a phone the fix is: the session list
+     becomes a horizontal scrollable strip (the same move .chat-channels
+     makes on mobile); the header wraps its controls onto one extra
+     full-width row instead of overflowing; and the conversation panel is
+     sized to the viewport so its composer is always reachable, with the
+     workspace tree living below it for the (rare on a phone) time you want
+     it. */
+  #codeView { padding: 16px 10px 24px; }
+  .code-layout { gap: 10px; min-height: 0; }
+
+  /* Land on the conversation: the session strip and the workspace tree move
+     below it (they're the secondary things on a phone). */
+  .code-main { order: 1; }
+  .code-sidebar { order: 2; }
+  .code-workspace { order: 3; }
+
+  .code-sidebar { max-height: none; }
+  .code-sidebar-header { padding: 7px 10px; }
+  .code-session-list {
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 6px;
+    flex: none;
+  }
+  .code-session {
+    flex: 0 0 auto;
+    max-width: 170px;
+    border: 1px solid var(--border);
+  }
+  .code-session.active { border-color: var(--accent); }
+  .code-session-open { padding: 6px 9px; }
+  .code-session-rename { display: none; }        /* rename via the header title on mobile */
+  .code-session-delete { opacity: 1; padding: 6px; align-self: stretch; }
+
+  .code-main {
+    min-height: 0;
+    height: 66vh;
+  }
+  .code-header {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    padding: 8px 10px;
+    gap: 6px;
+  }
+  #codeSessionTitle { flex: 1 1 40px; font-size: 0.85rem; }
+  .code-context { flex-shrink: 0; }
+  .code-header > #codeWorkspaceToggle { flex: 0 0 auto; width: 38px; }
+  .code-header-actions {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  /* The selects are 16px on touch (so iOS doesn't zoom the page on focus),
+     which is too wide to sit two-across at 375px — stack them full width,
+     which also gives bigger tap targets. */
+  #codeModelSelect,
+  #codeApprovalSelect { flex: 1 1 100%; max-width: none; padding: 8px 10px; }
+  #codeStopBtn { flex: 1 1 100%; }
+
+  .code-messages { padding: 12px; gap: 14px; }
+  .code-step-buttons { flex-wrap: wrap; }
+  .code-step-buttons .btn { flex: 1 1 120px; }
+  .code-composer { padding: 10px; }
+  /* The rotating placeholders wrap to two lines in a phone-width field —
+     give the empty composer room for both so the hint isn't clipped. */
+  .code-composer textarea { min-height: 62px; }
+
+  .code-workspace { max-height: 40vh; }
+  .code-ws-item { padding: 6px 8px 6px calc(6px + var(--depth, 0) * 11px); }
+
+  .code-empty { gap: 10px; padding: 20px 4px; }
+  .code-example-chips { flex-direction: column; align-self: stretch; width: 100%; }
+  .code-example-chips button { width: 100%; padding: 9px 12px; }
+
+  /* Let the file viewer's <pre> scroll horizontally rather than stretch
+     the modal past the screen (shares .logs-card with the Docker logs). */
+  .logs-card .logs-output,
+  #codeFileContent { font-size: 0.72rem; }
 }
 
 .login-wrap {

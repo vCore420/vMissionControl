@@ -1,8 +1,9 @@
 import { api } from './api.js';
 import { drawConnectionLines, buildAdjacency, highlightNeighbors, clearHighlight } from './connections.js';
+import { renderMarkdown } from './markdown.js';
 import {
   state, el, toast, escapeHtml, escapeAttr, copyToClipboard, groupById, loadAll,
-  dragState, enableDragReorder,
+  dragState, enableDragReorder, setLocal, artProgressListeners,
 } from './core.js';
 
 // Dashboard: service cards/list/graph views, the group filter chips, the
@@ -87,6 +88,17 @@ function faviconUrl(url) {
   } catch {
     return null;
   }
+}
+
+// The one place the icon precedence lives (creative roadmap Phase 1b added
+// the generated-icon tier on top): a ComfyUI-generated icon wins, then a
+// picked emoji, then the site's favicon, then a plain link glyph. Returns
+// { img } (a URL to render as <img>) xor { emoji } (text).
+function serviceGlyph(service) {
+  if (service.iconImage) return { img: api.serviceIconUrl(service.id, service.iconImage) };
+  if (service.icon) return { emoji: service.icon };
+  const fav = faviconUrl(service.url);
+  return fav ? { img: fav } : { emoji: '🔗' };
 }
 
 const UPTIME_SAMPLES = 30;
@@ -182,12 +194,10 @@ function buildCardElement(service, adjacency) {
   const sl = statusLabel(status);
   const connectionCount = (adjacency.get(service.id) || new Set()).size;
 
-  const favicon = service.icon ? null : faviconUrl(service.url);
-  const iconMarkup = service.icon
-    ? `<div class="card-icon">${escapeHtml(service.icon)}</div>`
-    : favicon
-      ? `<img class="card-favicon" alt="" src="${escapeAttr(favicon)}" />`
-      : `<div class="card-icon">🔗</div>`;
+  const glyph = serviceGlyph(service);
+  const iconMarkup = glyph.img
+    ? `<img class="card-favicon" alt="" src="${escapeAttr(glyph.img)}" />`
+    : `<div class="card-icon">${escapeHtml(glyph.emoji)}</div>`;
 
   const card = document.createElement('div');
   card.className = 'service-card';
@@ -220,6 +230,7 @@ function buildCardElement(service, adjacency) {
         <a class="enter-btn" href="${escapeAttr(service.url)}" target="_blank" rel="noopener">Enter</a>
         <button class="icon-btn recheck-btn" title="Check now">⟳</button>
         ${service.mac ? '<button class="icon-btn wake-btn" title="Send a Wake-on-LAN packet">⚡</button>' : ''}
+        ${service.game?.kind ? '<button type="button" class="icon-btn game-console-btn" title="Game console">🎮</button>' : ''}
         ${controlButtonsMarkup(service, 'icon-btn')}
       </div>
     </div>
@@ -304,6 +315,11 @@ function buildCardElement(service, adjacency) {
     }
   });
 
+  card.querySelector('.game-console-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openGameConsole(service);
+  });
+
   wireControlButtons(card, service);
 
   // Click-to-toggle rather than hover: hover doesn't fire on touch devices
@@ -354,15 +370,431 @@ function setDashboardLayoutVisibility(mode) {
   cardGrid.classList.toggle('hidden', mode !== 'card');
   el('servicesListView').classList.toggle('hidden', mode !== 'list');
   el('servicesGraphView').classList.toggle('hidden', mode !== 'graph');
+  el('servicesBoardView').classList.toggle('hidden', mode !== 'board');
   if (mode !== 'card') el('pinnedSection').classList.add('hidden');
   svgOverlay.classList.toggle('visible', mode === 'card' && state.connectionsVisible);
+  // The board isn't a view of the services, so the group filter, the "add a
+  // service" button, and the "no services yet" empty state don't apply to it.
+  el('groupFilters').classList.toggle('hidden', mode === 'board');
+  el('addServiceBtn').classList.toggle('hidden', mode === 'board');
+  if (mode === 'board') el('emptyState').classList.add('hidden');
+  // Leaving the board: stop the fetch-widget polling and force a rebuild
+  // (which restarts the timers) on the way back in.
+  if (mode !== 'board') {
+    clearPollTimers();
+    lastWidgetsSignature = null;
+  }
 }
 
 export function renderCards() {
   setDashboardLayoutVisibility(state.dashboardViewMode);
   if (state.dashboardViewMode === 'list') renderServicesListView();
   else if (state.dashboardViewMode === 'graph') renderServicesGraphView();
+  else if (state.dashboardViewMode === 'board') renderBoardView();
   else renderServicesCardView();
+}
+
+// ---------- Board view (creative roadmap Phase 3) ----------
+// A 4th dashboard mode showing config.widgets — iframe / note / links / fetch /
+// jellyfin / host-stats / service-status / clock / countdown / photo / docker
+// tiles. Per-widget content can be an <iframe>, so a full rebuild on every
+// unrelated config broadcast would reload embedded pages; renderBoardView
+// skips the rebuild when the widgets array is byte-for-byte unchanged.
+
+let lastWidgetsSignature = null;
+const pollTimers = new Map(); // widget id -> interval handle (fetch, jellyfin, host-stats, clock, countdown, photo, docker)
+const JELLYFIN_POLL_SEC = 5;
+const photoState = new Map(); // photo widget id -> { images: string[], idx, loadedAt }
+
+function clearPollTimers() {
+  for (const t of pollTimers.values()) clearInterval(t);
+  pollTimers.clear();
+  photoState.clear(); // re-fetch each photo widget's image list on the next board build
+}
+
+async function refreshFetchWidget(w) {
+  const box = el('boardGrid').querySelector(`.board-widget[data-id="${w.id}"] .board-widget-value`);
+  if (!box) return;
+  try {
+    const { value, error } = await api.getWidgetValue(w.id);
+    box.classList.toggle('is-error', !!error);
+    box.textContent = error ? `⚠ ${error}` : value;
+  } catch (err) {
+    box.classList.add('is-error');
+    box.textContent = `⚠ ${err.message}`;
+  }
+}
+
+function fmtTime(sec) {
+  if (!sec || sec < 0) return '0:00';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+async function refreshJellyfinWidget(w) {
+  const box = el('boardGrid').querySelector(`.board-widget[data-id="${w.id}"] .board-widget-jellyfin`);
+  if (!box) return;
+  let data;
+  try {
+    data = await api.jellyfinNowPlaying();
+  } catch (err) {
+    box.innerHTML = `<div class="board-widget-jf-empty">⚠ ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+  if (!data.configured) {
+    box.innerHTML = `<div class="board-widget-jf-empty">Set up Jellyfin in Settings → Jellyfin</div>`;
+    return;
+  }
+  if (data.error) {
+    box.innerHTML = `<div class="board-widget-jf-empty">⚠ ${escapeHtml(data.error)}</div>`;
+    return;
+  }
+  if (!data.sessions.length) {
+    box.innerHTML = `<div class="board-widget-jf-empty">Nothing playing</div>`;
+    return;
+  }
+
+  box.innerHTML = data.sessions.map((s) => {
+    const pct = s.durationSec ? Math.min(100, Math.round((s.positionSec / s.durationSec) * 100)) : 0;
+    const poster = s.itemId
+      ? `<img class="board-widget-jf-poster" alt="" src="${escapeAttr(api.jellyfinImageUrl(s.itemId, s.imageTag))}" onerror="this.remove()" />`
+      : '';
+    return `
+      <div class="board-widget-jf-session" data-session="${escapeAttr(s.sessionId)}">
+        ${poster}
+        <div class="board-widget-jf-info">
+          <div class="board-widget-jf-title">${escapeHtml(s.title)}</div>
+          ${s.subtitle ? `<div class="board-widget-jf-sub">${escapeHtml(String(s.subtitle))}</div>` : ''}
+          <div class="board-widget-jf-meta">on ${escapeHtml(s.deviceName)}${s.userName ? ` · ${escapeHtml(s.userName)}` : ''}</div>
+          <div class="board-widget-jf-bar"><span style="width:${pct}%"></span></div>
+          <div class="board-widget-jf-time">${fmtTime(s.positionSec)}${s.durationSec ? ` / ${fmtTime(s.durationSec)}` : ''}</div>
+          <div class="board-widget-jf-controls">
+            <button type="button" data-cmd="PreviousTrack" title="Previous">⏮</button>
+            <button type="button" data-cmd="PlayPause" title="${s.isPaused ? 'Play' : 'Pause'}">${s.isPaused ? '▶' : '⏸'}</button>
+            <button type="button" data-cmd="NextTrack" title="Next">⏭</button>
+            <button type="button" data-cmd="Stop" title="Stop">⏹</button>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  box.querySelectorAll('.board-widget-jf-session').forEach((row) => {
+    const sessionId = row.dataset.session;
+    row.querySelectorAll('button[data-cmd]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await api.jellyfinCommand(sessionId, btn.dataset.cmd);
+        } catch (err) {
+          toast(err.message, true);
+        }
+        setTimeout(() => refreshJellyfinWidget(w), 500);
+      });
+    });
+  });
+}
+
+// ---------- Board widgets: host-stats / service-status / clock / countdown (ops roadmap Phase 2a) ----------
+
+function sparkline(values, { w = 120, h = 28 } = {}) {
+  const nums = values.filter((v) => typeof v === 'number');
+  if (nums.length < 2) return `<svg class="mini-spark" viewBox="0 0 ${w} ${h}"></svg>`;
+  const step = w / (nums.length - 1);
+  const pts = nums.map((v, i) => `${(i * step).toFixed(1)},${(h - (Math.max(0, Math.min(100, v)) / 100) * h).toFixed(1)}`).join(' ');
+  return `<svg class="mini-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" />
+  </svg>`;
+}
+
+async function refreshHostStatsWidget(w) {
+  const box = el('boardGrid').querySelector(`.board-widget[data-id="${w.id}"] .board-widget-hoststats`);
+  if (!box) return;
+  try {
+    const d = await api.getHostHistory();
+    const hist = d.history || [];
+    const rows = [
+      ['CPU', d.cpuPercent, hist.map((s) => s.cpu)],
+      ['Memory', d.memory ? Math.round((d.memory.used / d.memory.total) * 100) : null, hist.map((s) => s.mem)],
+      ['Disk', d.disk ? Math.round((d.disk.used / d.disk.total) * 100) : null, hist.map((s) => s.disk)],
+    ];
+    box.innerHTML = rows.filter(([, pct]) => pct != null).map(([label, pct, series]) => `
+      <div class="hoststat-row ${pct >= 92 ? 'high' : pct >= 80 ? 'mid' : ''}">
+        <span class="hoststat-label">${label}</span>
+        ${sparkline(series)}
+        <span class="hoststat-pct">${pct}%</span>
+      </div>`).join('') || '<div class="board-widget-empty">no host data</div>';
+  } catch (err) {
+    box.innerHTML = `<div class="board-widget-empty">⚠ ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderServiceStatusWidget(w) {
+  const box = el('boardGrid').querySelector(`.board-widget[data-id="${w.id}"] .board-widget-svcstatus`);
+  if (!box) return;
+  const ids = w.serviceIds || [];
+  if (!ids.length) { box.innerHTML = '<div class="board-widget-empty">no services picked</div>'; return; }
+  box.innerHTML = ids.map((id) => {
+    const svc = state.config.services.find((s) => s.id === id);
+    if (!svc) return '';
+    const sl = statusLabel(state.status.get(id));
+    return `<div class="svcstatus-row"><span class="status-dot ${sl.cls}"></span><span class="svcstatus-name">${escapeHtml(svc.name)}</span><span class="svcstatus-text">${escapeHtml(sl.text)}</span></div>`;
+  }).join('');
+}
+
+function refreshServiceStatusWidgets() {
+  for (const w of state.config.widgets || []) if (w.type === 'service-status') renderServiceStatusWidget(w);
+}
+
+function clockParts(w) {
+  const now = new Date();
+  const opts = { hour: '2-digit', minute: '2-digit', hour12: false };
+  if (w.showSeconds) opts.second = '2-digit';
+  if (w.timezone) opts.timeZone = w.timezone;
+  let time, date;
+  try {
+    time = new Intl.DateTimeFormat('en-GB', opts).format(now);
+    date = w.showDate ? new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', ...(w.timezone ? { timeZone: w.timezone } : {}) }).format(now) : '';
+  } catch {
+    time = now.toLocaleTimeString();
+    date = w.showDate ? now.toLocaleDateString() : '';
+  }
+  return { time, date, zone: w.timezone || '' };
+}
+
+function renderClockWidget(w) {
+  const box = el('boardGrid').querySelector(`.board-widget[data-id="${w.id}"] .board-widget-clock`);
+  if (!box) return;
+  const { time, date, zone } = clockParts(w);
+  box.innerHTML = `<div class="clock-time">${escapeHtml(time)}</div>${date ? `<div class="clock-date">${escapeHtml(date)}</div>` : ''}${zone ? `<div class="clock-zone">${escapeHtml(zone.replace(/_/g, ' '))}</div>` : ''}`;
+}
+
+function renderCountdownWidget(w) {
+  const box = el('boardGrid').querySelector(`.board-widget[data-id="${w.id}"] .board-widget-countdown`);
+  if (!box) return;
+  const t = w.target ? Date.parse(w.target) : NaN;
+  if (Number.isNaN(t)) { box.innerHTML = '<div class="board-widget-empty">no target set</div>'; return; }
+  let ms = t - Date.now();
+  const past = ms < 0;
+  ms = Math.abs(ms);
+  const d = Math.floor(ms / 86400000);
+  const h = Math.floor((ms % 86400000) / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  const big = d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m ${s}s`;
+  box.innerHTML = `
+    ${w.label ? `<div class="countdown-label">${escapeHtml(w.label)}</div>` : ''}
+    <div class="countdown-big">${big}</div>
+    <div class="countdown-sub">${past ? 'ago' : 'remaining'}</div>`;
+}
+
+// ---------- Photo widget (ops roadmap Phase 2b) ----------
+// Rotates through the images in a shared-folder subdir. No new serving path:
+// the list comes from GET /api/files and each frame is an <img> pointed at
+// /api/files/download, exactly like the Files tab's thumbnail view. The
+// image list is re-fetched occasionally so photos added on disk show up.
+
+const PHOTO_IMG_RE = /\.(jpe?g|png|gif|webp|avif|bmp|svg)$/i;
+const PHOTO_LIST_TTL_MS = 10 * 60 * 1000;
+
+async function loadPhotoList(w) {
+  const rel = w.folder || '';
+  const { items } = await api.listFiles(rel);
+  let images = items.filter((it) => it.type === 'file' && PHOTO_IMG_RE.test(it.name))
+    .map((it) => (rel ? `${rel}/${it.name}` : it.name));
+  if (w.shuffle !== false) {
+    for (let i = images.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [images[i], images[j]] = [images[j], images[i]];
+    }
+  }
+  photoState.set(w.id, { images, idx: 0, loadedAt: Date.now() });
+}
+
+async function refreshPhotoWidget(w) {
+  const box = el('boardGrid').querySelector(`.board-widget[data-id="${w.id}"] .board-widget-photo`);
+  if (!box) return;
+  try {
+    let st = photoState.get(w.id);
+    if (!st || Date.now() - st.loadedAt > PHOTO_LIST_TTL_MS) {
+      await loadPhotoList(w);
+      st = photoState.get(w.id);
+    }
+    if (!st.images.length) {
+      box.innerHTML = `<div class="board-widget-empty">no images in ${escapeHtml(w.folder || 'the shared folder')}</div>`;
+      return;
+    }
+    const path = st.images[st.idx % st.images.length];
+    st.idx = (st.idx + 1) % st.images.length;
+    const img = new Image();
+    img.className = `photo-frame fit-${w.fit === 'contain' ? 'contain' : 'cover'}`;
+    img.alt = '';
+    img.src = api.downloadUrl(path);
+    img.onload = () => { box.replaceChildren(img); };
+    img.onerror = () => { box.innerHTML = '<div class="board-widget-empty">⚠ image failed to load</div>'; };
+    if (!box.querySelector('img')) box.innerHTML = '<div class="board-widget-empty">…</div>';
+  } catch (err) {
+    const msg = /disabled/i.test(err.message) ? 'the shared folder is turned off' : err.message;
+    box.innerHTML = `<div class="board-widget-empty">⚠ ${escapeHtml(msg)}</div>`;
+  }
+}
+
+// ---------- Docker widget (ops roadmap Phase 2b) ----------
+// Raw containers (not services): state + start/stop/restart/logs. Controls
+// are Service-Control-gated server-side; this shows the gate rather than
+// hiding the buttons, same as the game console.
+
+async function refreshDockerWidget(w) {
+  const box = el('boardGrid').querySelector(`.board-widget[data-id="${w.id}"] .board-widget-docker`);
+  if (!box) return;
+  const scOn = !!state.config.security?.serviceControl?.enabled && !!state.config.auth?.enabled;
+  try {
+    const { containers } = await api.getDockerContainers();
+    const pick = new Set(w.containers || []);
+    let rows = containers;
+    if (pick.size) rows = containers.filter((c) => pick.has(c.name) || pick.has(c.id));
+    rows.sort((a, b) => a.name.localeCompare(b.name));
+    if (!rows.length) {
+      box.innerHTML = `<div class="board-widget-empty">${pick.size ? 'none of the picked containers exist' : 'no containers'}</div>`;
+      return;
+    }
+    box.innerHTML = rows.map((c) => {
+      const running = c.state === 'running';
+      const toggle = running ? 'stop' : 'start';
+      return `<div class="docker-row" data-name="${escapeAttr(c.name)}">
+        <span class="status-dot ${running ? 'online' : 'offline'}"></span>
+        <span class="docker-name" title="${escapeAttr(c.status || '')}">${escapeHtml(c.name)}</span>
+        <span class="docker-actions">
+          <button type="button" class="docker-btn" data-act="${toggle}" ${scOn ? '' : 'disabled'} title="${scOn ? '' : 'Service Control is off'}">${running ? '⏹' : '▶'}</button>
+          <button type="button" class="docker-btn" data-act="restart" ${scOn && running ? '' : 'disabled'} title="${scOn ? 'Restart' : 'Service Control is off'}">⟳</button>
+          <button type="button" class="docker-btn" data-act="logs" title="Logs">📜</button>
+        </span>
+      </div>`;
+    }).join('');
+    box.querySelectorAll('.docker-row').forEach((row) => {
+      const name = row.dataset.name;
+      row.querySelectorAll('.docker-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const act = btn.dataset.act;
+          if (act === 'logs') { openLogsFor({ kind: 'container', name }); return; }
+          btn.disabled = true;
+          try {
+            await api.dockerContainerAction(name, act);
+            toast(`${name}: ${act} sent`);
+            setTimeout(() => refreshDockerWidget(w), 1500);
+          } catch (err) {
+            toast(err.message, true);
+            btn.disabled = false;
+          }
+        });
+      });
+    });
+  } catch (err) {
+    box.innerHTML = `<div class="board-widget-empty">⚠ ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function startPollTimers() {
+  for (const w of state.config.widgets || []) {
+    if (w.type === 'fetch') {
+      refreshFetchWidget(w);
+      pollTimers.set(w.id, setInterval(() => refreshFetchWidget(w), Math.max(10, Number(w.refreshSec) || 60) * 1000));
+    } else if (w.type === 'jellyfin') {
+      refreshJellyfinWidget(w);
+      pollTimers.set(w.id, setInterval(() => refreshJellyfinWidget(w), JELLYFIN_POLL_SEC * 1000));
+    } else if (w.type === 'host-stats') {
+      refreshHostStatsWidget(w);
+      pollTimers.set(w.id, setInterval(() => refreshHostStatsWidget(w), 5000));
+    } else if (w.type === 'clock') {
+      renderClockWidget(w);
+      pollTimers.set(w.id, setInterval(() => renderClockWidget(w), 1000));
+    } else if (w.type === 'countdown') {
+      renderCountdownWidget(w);
+      pollTimers.set(w.id, setInterval(() => renderCountdownWidget(w), 1000));
+    } else if (w.type === 'photo') {
+      refreshPhotoWidget(w);
+      pollTimers.set(w.id, setInterval(() => refreshPhotoWidget(w), Math.max(5, Number(w.rotateSec) || 20) * 1000));
+    } else if (w.type === 'docker') {
+      refreshDockerWidget(w);
+      pollTimers.set(w.id, setInterval(() => refreshDockerWidget(w), 10000));
+    } else if (w.type === 'service-status') {
+      renderServiceStatusWidget(w); // no timer — rides status ticks via renderCardStatuses
+    }
+  }
+}
+
+function renderBoardView() {
+  const widgets = state.config.widgets || [];
+  const signature = JSON.stringify(widgets);
+  const grid = el('boardGrid');
+  if (signature === lastWidgetsSignature && grid.children.length === widgets.length) {
+    el('boardEmpty').classList.toggle('hidden', widgets.length > 0);
+    return;
+  }
+  lastWidgetsSignature = signature;
+
+  clearPollTimers();
+  grid.innerHTML = '';
+  for (const w of widgets) grid.appendChild(buildWidgetElement(w));
+  el('boardEmpty').classList.toggle('hidden', widgets.length > 0);
+  startPollTimers();
+}
+
+function widgetBodyMarkup(w) {
+  if (w.type === 'iframe') {
+    return `<iframe class="board-widget-frame" src="${escapeAttr(w.url)}" style="height:${Number(w.height) || 260}px"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-popups" loading="lazy" referrerpolicy="no-referrer"></iframe>`;
+  }
+  if (w.type === 'note') {
+    return `<div class="board-widget-note">${renderMarkdown(w.markdown || '')}</div>`;
+  }
+  if (w.type === 'links') {
+    const links = (w.links || [])
+      .map((l) => `<a href="${escapeAttr(l.url)}" target="_blank" rel="noopener">${escapeHtml(l.label || l.url)}</a>`)
+      .join('');
+    return `<div class="board-widget-links">${links || '<span class="board-widget-empty">no links yet</span>'}</div>`;
+  }
+  if (w.type === 'fetch') {
+    return `<div class="board-widget-value">…</div>`;
+  }
+  if (w.type === 'jellyfin') {
+    return `<div class="board-widget-jellyfin"><div class="board-widget-jf-empty">…</div></div>`;
+  }
+  if (w.type === 'host-stats') return `<div class="board-widget-hoststats">…</div>`;
+  if (w.type === 'service-status') return `<div class="board-widget-svcstatus">…</div>`;
+  if (w.type === 'clock') return `<div class="board-widget-clock"></div>`;
+  if (w.type === 'countdown') return `<div class="board-widget-countdown"></div>`;
+  if (w.type === 'photo') return `<div class="board-widget-photo"><div class="board-widget-empty">…</div></div>`;
+  if (w.type === 'docker') return `<div class="board-widget-docker"><div class="board-widget-empty">…</div></div>`;
+  return '';
+}
+
+function buildWidgetElement(w) {
+  const node = document.createElement('div');
+  node.className = `board-widget size-${w.size || 'sm'}`;
+  node.dataset.id = w.id;
+  node.setAttribute('draggable', 'true');
+  node.innerHTML = `
+    <div class="board-widget-head">
+      <span class="board-widget-title">${escapeHtml(w.title || defaultWidgetTitle(w))}</span>
+      <button type="button" class="board-widget-edit" title="Edit widget">✎</button>
+    </div>
+    <div class="board-widget-body">${widgetBodyMarkup(w)}</div>`;
+  node.querySelector('.board-widget-edit').addEventListener('click', () => openWidgetModal(w.id));
+  return node;
+}
+
+function defaultWidgetTitle(w) {
+  if (w.type === 'iframe' || w.type === 'fetch') {
+    try { return new URL(w.url).hostname; } catch { return w.type === 'fetch' ? 'Value' : 'Embedded page'; }
+  }
+  return {
+    jellyfin: 'Now playing', 'host-stats': 'Host stats', 'service-status': 'Service status',
+    clock: w.timezone ? w.timezone.split('/').pop().replace(/_/g, ' ') : 'Clock',
+    countdown: w.label || 'Countdown', note: 'Note', links: 'Links',
+    photo: w.folder ? w.folder.split('/').pop() : 'Photos', docker: 'Containers',
+  }[w.type] || 'Widget';
 }
 
 function renderServicesCardView() {
@@ -399,9 +831,8 @@ function renderServicesCardView() {
 }
 
 function rowFaviconOrIcon(service) {
-  if (service.icon) return escapeHtml(service.icon);
-  const url = faviconUrl(service.url);
-  return url ? `<img src="${escapeAttr(url)}" alt="" />` : '🔗';
+  const glyph = serviceGlyph(service);
+  return glyph.img ? `<img src="${escapeAttr(glyph.img)}" alt="" />` : escapeHtml(glyph.emoji);
 }
 
 function renderServicesListView() {
@@ -503,6 +934,13 @@ function renderServicesGraphView() {
 }
 
 export function renderCardStatuses() {
+  // On the board, a status tick patches any service-status widget in place
+  // (a full rebuild would reload the iframes) and the online badge.
+  if (state.dashboardViewMode === 'board') {
+    refreshServiceStatusWidgets();
+    renderOnlineBadge();
+    return;
+  }
   if (state.dashboardViewMode === 'card') {
     for (const [id, card] of cardsById) {
       const status = state.status.get(id);
@@ -543,7 +981,7 @@ el('toggleConnections').addEventListener('click', () => {
     renderConnectionOverlay();
     if (!localStorage.getItem('mc:seenConnectionsHint')) {
       toast('Tap a card with a 🔗 badge to see what it’s connected to');
-      localStorage.setItem('mc:seenConnectionsHint', 'true');
+      setLocal('mc:seenConnectionsHint', 'true');
     }
   }
 });
@@ -552,7 +990,7 @@ el('dashboardLayoutSwitch').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-layout]');
   if (!btn) return;
   state.dashboardViewMode = btn.dataset.layout;
-  localStorage.setItem('mc:dashboardView', state.dashboardViewMode);
+  setLocal('mc:dashboardView', state.dashboardViewMode);
   el('dashboardLayoutSwitch').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
   renderCards();
 });
@@ -722,6 +1160,224 @@ enableDragReorder(pinnedGrid, {
   onError: loadAll,
 });
 
+enableDragReorder(el('boardGrid'), {
+  itemSelector: '.board-widget',
+  reorder: api.reorderWidgets,
+  onSuccess: (ids) => {
+    const byId = new Map((state.config.widgets || []).map((w) => [w.id, w]));
+    state.config.widgets = ids.map((id) => byId.get(id));
+    lastWidgetsSignature = JSON.stringify(state.config.widgets);
+  },
+  onError: loadAll,
+});
+
+// ---------- Board widget modal (creative roadmap Phase 3) ----------
+
+const widgetModal = el('widgetModal');
+const widgetForm = el('widgetForm');
+let editingWidgetId = null;
+
+function setWidgetTypeFields(type) {
+  el('widgetIframeFields').classList.toggle('hidden', type !== 'iframe');
+  el('widgetNoteFields').classList.toggle('hidden', type !== 'note');
+  el('widgetLinksFields').classList.toggle('hidden', type !== 'links');
+  el('widgetFetchFields').classList.toggle('hidden', type !== 'fetch');
+  el('widgetHostStatsFields').classList.toggle('hidden', type !== 'host-stats');
+  el('widgetServiceStatusFields').classList.toggle('hidden', type !== 'service-status');
+  el('widgetClockFields').classList.toggle('hidden', type !== 'clock');
+  el('widgetCountdownFields').classList.toggle('hidden', type !== 'countdown');
+  el('widgetPhotoFields').classList.toggle('hidden', type !== 'photo');
+  el('widgetDockerFields').classList.toggle('hidden', type !== 'docker');
+}
+
+// The 'docker' widget's picker — a live checklist of the host's containers,
+// fetched when the modal opens. Any already-picked name that isn't currently
+// present is kept as a checked row so editing doesn't silently drop it.
+async function renderWidgetDockerChecklist(picked) {
+  const box = el('widgetDockerChecklist');
+  const set = new Set(picked || []);
+  box.innerHTML = '<p class="settings-hint" style="margin:0;">Loading containers…</p>';
+  try {
+    const { containers } = await api.getDockerContainers();
+    const present = new Set(containers.map((c) => c.name));
+    for (const p of set) if (!present.has(p)) containers.push({ name: p, state: 'not found' });
+    box.innerHTML = containers.map((c) => `
+      <label><input type="checkbox" value="${escapeAttr(c.name)}" ${set.has(c.name) ? 'checked' : ''} /> ${escapeHtml(c.name)} <span style="color:var(--text-faint);">(${escapeHtml(c.state)})</span></label>
+    `).join('') || '<p class="settings-hint" style="margin:0;">No containers found.</p>';
+  } catch (err) {
+    box.innerHTML = `<p class="settings-hint" style="margin:0;">Couldn't reach Docker — ${escapeHtml(err.message)}. Leave this blank and the widget will show all containers once Docker is reachable.</p>`;
+  }
+}
+
+function renderWidgetServiceChecklist(picked) {
+  const set = new Set(picked || []);
+  el('widgetServiceChecklist').innerHTML = state.config.services.map((s) => `
+    <label><input type="checkbox" value="${escapeAttr(s.id)}" ${set.has(s.id) ? 'checked' : ''} /> ${escapeHtml(s.name)}</label>
+  `).join('') || '<p class="settings-hint" style="margin:0;">No services yet.</p>';
+}
+
+// <input type="datetime-local"> wants "YYYY-MM-DDTHH:mm" in the viewer's
+// local time; the widget stores an ISO string (UTC). toISOString().slice()
+// would show the target shifted by the UTC offset, so format from the
+// local getters instead.
+function isoToLocalInput(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// A handful of common zones for the datalist — the field still accepts any
+// valid IANA name (the server validates).
+const COMMON_TZ = [
+  'Pacific/Auckland', 'Australia/Sydney', 'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Kolkata',
+  'Asia/Dubai', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'America/New_York',
+  'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'UTC',
+];
+
+function renderWidgetLinkRows(links) {
+  const wrap = el('widgetLinksList');
+  wrap.innerHTML = (links.length ? links : [{ label: '', url: '' }])
+    .map((l, i) => `
+      <div class="widget-link-row" data-i="${i}">
+        <input class="widget-link-label" placeholder="Label" value="${escapeAttr(l.label || '')}" maxlength="60" />
+        <input class="widget-link-url" placeholder="https://…" value="${escapeAttr(l.url || '')}" maxlength="2000" />
+        <button type="button" class="btn ghost widget-link-remove">✕</button>
+      </div>`)
+    .join('');
+  wrap.querySelectorAll('.widget-link-remove').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      btn.closest('.widget-link-row').remove();
+    });
+  });
+}
+
+function collectWidgetLinks() {
+  return Array.from(el('widgetLinksList').querySelectorAll('.widget-link-row')).map((row) => ({
+    label: row.querySelector('.widget-link-label').value.trim(),
+    url: row.querySelector('.widget-link-url').value.trim(),
+  })).filter((l) => l.url);
+}
+
+function openWidgetModal(widgetId = null) {
+  editingWidgetId = widgetId;
+  widgetForm.reset();
+  el('widgetFormError').classList.add('hidden');
+  const w = widgetId ? (state.config.widgets || []).find((x) => x.id === widgetId) : null;
+
+  el('widgetModalTitle').textContent = w ? 'Edit widget' : 'Add a widget';
+  el('deleteWidgetBtn').classList.toggle('hidden', !w);
+  // Type is fixed once created — a tile is what it was made as.
+  el('widgetTypeSelect').disabled = !!w;
+  el('widgetTypeSelect').value = w ? w.type : 'iframe';
+  widgetForm.elements.title.value = w?.title || '';
+  el('widgetSizeSelect').value = w?.size || 'sm';
+  widgetForm.elements.url.value = w?.type === 'iframe' ? (w?.url || '') : '';
+  widgetForm.elements.height.value = w?.height || '';
+  widgetForm.elements.markdown.value = w?.markdown || '';
+  widgetForm.elements.fetchUrl.value = w?.type === 'fetch' ? (w?.url || '') : '';
+  widgetForm.elements.template.value = w?.template || '';
+  widgetForm.elements.refreshSec.value = w?.refreshSec || '';
+  widgetForm.elements.timezone.value = w?.timezone || '';
+  widgetForm.elements.showSeconds.checked = !!w?.showSeconds;
+  widgetForm.elements.showDate.checked = w ? w.showDate !== false : true;
+  widgetForm.elements.target.value = w?.target ? isoToLocalInput(w.target) : '';
+  widgetForm.elements.label.value = w?.label || '';
+  widgetForm.elements.folder.value = w?.folder || '';
+  widgetForm.elements.rotateSec.value = w?.rotateSec || '';
+  widgetForm.elements.fit.value = w?.fit === 'contain' ? 'contain' : 'cover';
+  widgetForm.elements.shuffle.checked = w ? w.shuffle !== false : true;
+  renderWidgetLinkRows(w?.links || []);
+  renderWidgetServiceChecklist(w?.serviceIds);
+  if ((w ? w.type : 'iframe') === 'docker') renderWidgetDockerChecklist(w?.containers);
+  el('tzList').innerHTML = COMMON_TZ.map((z) => `<option value="${z}">`).join('');
+  setWidgetTypeFields(w ? w.type : 'iframe');
+
+  widgetModal.classList.remove('hidden');
+}
+
+function closeWidgetModal() {
+  widgetModal.classList.add('hidden');
+  editingWidgetId = null;
+}
+
+el('widgetTypeSelect').addEventListener('change', (e) => {
+  setWidgetTypeFields(e.target.value);
+  if (e.target.value === 'docker') renderWidgetDockerChecklist([]);
+});
+el('addWidgetBtn').addEventListener('click', () => openWidgetModal(null));
+el('cancelWidgetBtn').addEventListener('click', closeWidgetModal);
+widgetModal.addEventListener('click', (e) => { if (e.target === widgetModal) closeWidgetModal(); });
+el('widgetAddLinkBtn').addEventListener('click', () => {
+  const rows = collectWidgetLinks();
+  rows.push({ label: '', url: '' });
+  renderWidgetLinkRows(rows);
+});
+
+widgetForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const type = el('widgetTypeSelect').value;
+  const payload = {
+    type,
+    title: widgetForm.elements.title.value.trim(),
+    size: el('widgetSizeSelect').value,
+  };
+  if (type === 'iframe') {
+    payload.url = widgetForm.elements.url.value.trim();
+    payload.height = Number(widgetForm.elements.height.value) || 260;
+  } else if (type === 'note') {
+    payload.markdown = widgetForm.elements.markdown.value;
+  } else if (type === 'links') {
+    payload.links = collectWidgetLinks();
+  } else if (type === 'fetch') {
+    payload.url = widgetForm.elements.fetchUrl.value.trim();
+    payload.template = widgetForm.elements.template.value;
+    payload.refreshSec = Number(widgetForm.elements.refreshSec.value) || 60;
+  } else if (type === 'service-status') {
+    payload.serviceIds = Array.from(el('widgetServiceChecklist').querySelectorAll('input:checked')).map((i) => i.value);
+  } else if (type === 'clock') {
+    payload.timezone = widgetForm.elements.timezone.value.trim();
+    payload.showSeconds = widgetForm.elements.showSeconds.checked;
+    payload.showDate = widgetForm.elements.showDate.checked;
+  } else if (type === 'countdown') {
+    const v = widgetForm.elements.target.value;
+    payload.target = v ? new Date(v).toISOString() : '';
+    payload.label = widgetForm.elements.label.value.trim();
+  } else if (type === 'photo') {
+    payload.folder = widgetForm.elements.folder.value.trim();
+    payload.rotateSec = Number(widgetForm.elements.rotateSec.value) || 20;
+    payload.fit = widgetForm.elements.fit.value === 'contain' ? 'contain' : 'cover';
+    payload.shuffle = widgetForm.elements.shuffle.checked;
+  } else if (type === 'docker') {
+    payload.containers = Array.from(el('widgetDockerChecklist').querySelectorAll('input:checked')).map((i) => i.value);
+  }
+
+  try {
+    if (editingWidgetId) await api.updateWidget(editingWidgetId, payload);
+    else await api.addWidget(payload);
+    await loadAll();
+    lastWidgetsSignature = null; // force the board to rebuild with the change
+    renderCards();
+    closeWidgetModal();
+  } catch (err) {
+    el('widgetFormError').textContent = err.message;
+    el('widgetFormError').classList.remove('hidden');
+  }
+});
+
+el('deleteWidgetBtn').addEventListener('click', async () => {
+  if (!editingWidgetId) return;
+  try {
+    await api.deleteWidget(editingWidgetId);
+    await loadAll();
+    lastWidgetsSignature = null;
+    renderCards();
+    closeWidgetModal();
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+
 // ---------- Add/Edit service modal ----------
 
 const serviceModal = el('serviceModal');
@@ -836,6 +1492,12 @@ function updateControllerFieldVisibility(type) {
 
 el('controllerTypeSelect').addEventListener('change', (e) => updateControllerFieldVisibility(e.target.value));
 
+function updateGameFieldVisibility(kind) {
+  el('gameMinecraftFields').classList.toggle('hidden', kind !== 'minecraft');
+  el('gameFivemFields').classList.toggle('hidden', kind !== 'fivem');
+}
+el('gameKindSelect').addEventListener('change', (e) => updateGameFieldVisibility(e.target.value));
+
 // The health check path is meaningless for a Tailscale-CLI check, so it's
 // hidden rather than just left inert — same instinct as the controller
 // type fields above.
@@ -875,10 +1537,26 @@ export function openServiceModal(serviceId = null, prefill = null) {
     serviceForm.elements.controllerRestartCmd.value = s.controller?.restartCmd || '';
     serviceForm.elements.controllerContainer.value = s.controller?.container || '';
     updateControllerFieldVisibility(controllerType);
+    const gameKind = s.game?.kind || '';
+    serviceForm.elements.gameKind.value = gameKind;
+    serviceForm.elements.gameRconHost.value = s.game?.rconHost || '';
+    serviceForm.elements.gameRconPort.value = s.game?.rconPort || '';
+    serviceForm.elements.gameRconPassword.value = '';
+    serviceForm.elements.gameRconPassword.placeholder = s.game?.hasRconPassword
+      ? 'a password is saved — paste a new one to replace it'
+      : 'paste an RCON password';
+    el('gameRconKeyHint').textContent = s.game?.hasRconPassword
+      ? 'A password is stored. Leave blank to keep it.'
+      : '';
+    serviceForm.elements.gameQueryUrl.value = s.game?.queryUrl || '';
+    serviceForm.elements.gameTxAdminUrl.value = s.game?.txAdminUrl || '';
+    updateGameFieldVisibility(gameKind);
   } else {
     el('serviceModalTitle').textContent = 'Add Service';
     serviceForm.elements.healthCheckPath.value = '/';
     updateControllerFieldVisibility('');
+    updateGameFieldVisibility('');
+    el('gameRconKeyHint').textContent = '';
     // Used by the network discovery flow to hand off a found ip:port (and,
     // when the OS's ARP cache had it, a MAC address for Wake-on-LAN) —
     // otherwise every other "Add Service" path leaves this null.
@@ -890,9 +1568,81 @@ export function openServiceModal(serviceId = null, prefill = null) {
     }
   }
 
+  renderServiceIconGenerate();
   populateConnectionsChecklist(serviceId);
   serviceModal.classList.remove('hidden');
 }
+
+// Icon generation (creative roadmap Phase 1b) — only offered on an
+// already-saved service (needs its id + its name/description as the prompt),
+// and only when ComfyUI is set up. On success the 'config' broadcast
+// re-renders the cards; here we just refresh the modal's own preview.
+let serviceIconBusy = false;
+
+function renderServiceIconGenerate() {
+  const box = el('serviceIconGenerate');
+  if (!box) return;
+  const id = state.editingServiceId;
+  const service = id && state.config.services.find((s) => s.id === id);
+  const show = !!service && !!state.config?.comfy?.enabled;
+  box.classList.toggle('hidden', !show);
+  if (!show) return;
+
+  const hasIcon = !!service.iconImage;
+  el('serviceIconPreview').innerHTML = hasIcon
+    ? `<img alt="" src="${escapeAttr(api.serviceIconUrl(service.id, service.iconImage))}" />`
+    : '<span class="service-icon-preview-empty">no generated icon</span>';
+  el('removeServiceIconBtn').classList.toggle('hidden', !hasIcon);
+  el('generateServiceIconBtn').disabled = serviceIconBusy;
+  el('serviceIconExtra').disabled = serviceIconBusy;
+}
+
+function setServiceIconProgress(text) {
+  const box = el('serviceIconProgress');
+  if (!box) return;
+  box.classList.toggle('hidden', !text);
+  box.textContent = text || '';
+}
+
+artProgressListeners.add((msg) => {
+  if (msg.kind !== 'service-icon') return;
+  setServiceIconProgress(
+    msg.phase === 'sampling' ? `Generating… step ${msg.value}/${msg.max}`
+    : msg.phase === 'done' ? 'Finishing up…' : ''
+  );
+});
+
+el('generateServiceIconBtn').addEventListener('click', async () => {
+  const id = state.editingServiceId;
+  if (!id || serviceIconBusy) return;
+  serviceIconBusy = true;
+  renderServiceIconGenerate();
+  setServiceIconProgress('Starting… (a few minutes on CPU)');
+  try {
+    await api.generateServiceIcon(id, el('serviceIconExtra').value.trim());
+    await loadAll(); // pull the updated service.iconImage
+    el('serviceIconExtra').value = '';
+    toast('Icon generated');
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    serviceIconBusy = false;
+    setServiceIconProgress('');
+    renderServiceIconGenerate();
+  }
+});
+
+el('removeServiceIconBtn').addEventListener('click', async () => {
+  const id = state.editingServiceId;
+  if (!id) return;
+  try {
+    await api.deleteServiceIcon(id);
+    await loadAll();
+    renderServiceIconGenerate();
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
 
 function closeServiceModal() {
   serviceModal.classList.add('hidden');
@@ -917,6 +1667,28 @@ function buildControllerPayload(fd) {
     };
   }
   return null;
+}
+
+function buildGamePayload(fd) {
+  const kind = fd.get('gameKind');
+  if (kind === 'minecraft') {
+    const payload = {
+      kind: 'minecraft',
+      rconHost: fd.get('gameRconHost').trim(),
+      rconPort: Number(fd.get('gameRconPort')) || 25575,
+    };
+    const pw = fd.get('gameRconPassword').trim();
+    if (pw) payload.rconPassword = pw; // blank → server keeps the saved one
+    return payload;
+  }
+  if (kind === 'fivem') {
+    return {
+      kind: 'fivem',
+      queryUrl: fd.get('gameQueryUrl').trim(),
+      txAdminUrl: fd.get('gameTxAdminUrl').trim(),
+    };
+  }
+  return { kind: '' }; // server normalises a kind-less game to null
 }
 
 el('pickContainerBtn').addEventListener('click', async () => {
@@ -964,6 +1736,7 @@ serviceForm.addEventListener('submit', async (e) => {
     tailscaleHealthCheck: fd.get('tailscaleHealthCheck') === 'on',
     mac: fd.get('mac').trim(),
     controller: buildControllerPayload(fd),
+    game: buildGamePayload(fd),
   };
 
   try {
@@ -1032,16 +1805,22 @@ el('deleteServiceBtn').addEventListener('click', async () => {
 // while the modal is open rather than a true live stream (docker logs -f)
 // — simpler and doesn't hold a long-lived connection to the Docker socket
 // per viewer. Honest tradeoff, called out in the modal's own hint text.
+//
+// The same modal serves a Docker-backed service (opened from a card) and a
+// raw container (opened from the Board's 'docker' widget, ops roadmap Phase
+// 2b) — logsTarget carries which, and fetchAndRenderLogs picks the endpoint.
 
 const logsModal = el('logsModal');
 let logsPollTimer = null;
-let logsServiceId = null;
+let logsTarget = null; // { kind: 'service' | 'container', id, name }
 
 async function fetchAndRenderLogs() {
-  if (!logsServiceId) return;
+  if (!logsTarget) return;
   const output = el('logsOutput');
   try {
-    const { logs } = await api.getServiceLogs(logsServiceId);
+    const { logs } = logsTarget.kind === 'container'
+      ? await api.getContainerLogs(logsTarget.name)
+      : await api.getServiceLogs(logsTarget.id);
     const wasAtBottom = output.scrollTop + output.clientHeight >= output.scrollHeight - 20;
     output.textContent = logs || '(no output yet)';
     if (wasAtBottom) output.scrollTop = output.scrollHeight;
@@ -1055,8 +1834,12 @@ async function fetchAndRenderLogs() {
 const LOGS_POLL_MS = 4000;
 
 function openLogsModal(service) {
-  logsServiceId = service.id;
-  el('logsModalTitle').textContent = `${service.name} — logs`;
+  openLogsFor({ kind: 'service', id: service.id, name: service.name });
+}
+
+function openLogsFor(target) {
+  logsTarget = target;
+  el('logsModalTitle').textContent = `${target.name} — logs`;
   el('logsOutput').textContent = 'Loading…';
   el('logsError').classList.add('hidden');
   logsModal.classList.remove('hidden');
@@ -1069,9 +1852,120 @@ function closeLogsModal() {
   logsModal.classList.add('hidden');
   clearInterval(logsPollTimer);
   logsPollTimer = null;
-  logsServiceId = null;
+  logsTarget = null;
 }
 
 el('refreshLogsBtn').addEventListener('click', fetchAndRenderLogs);
 el('closeLogsBtn').addEventListener('click', closeLogsModal);
 logsModal.addEventListener('click', (e) => { if (e.target === logsModal) closeLogsModal(); });
+
+// ---------- Game server console (creative roadmap Phase 5) ----------
+// A player-list line (polled) plus a command box that runs over RCON. The
+// command endpoint is gated server-side (Service Control switch + password);
+// this shows the gate state rather than hiding the box.
+
+const gameConsoleModal = el('gameConsoleModal');
+let gameConsoleServiceId = null;
+let gameConsoleKind = null;
+let gamePlayersPollTimer = null;
+const GAME_PLAYERS_POLL_MS = 5000;
+
+async function refreshGamePlayers() {
+  if (!gameConsoleServiceId) return;
+  const info = el('gameServerInfo');
+  const box = el('gamePlayers');
+  try {
+    const s = await api.gameServerStatus(gameConsoleServiceId);
+    if (!s.online) {
+      info.classList.add('hidden');
+      box.innerHTML = `<span class="game-players-off">⚠ ${escapeHtml(s.error || 'unreachable')}</span>`;
+      return;
+    }
+    // server-info line — FiveM has one, Minecraft doesn't
+    const bits = [s.serverName, s.gametype, s.mapName, s.build && `build ${s.build}`,
+      s.resourceCount != null && `${s.resourceCount} resources`].filter(Boolean);
+    info.classList.toggle('hidden', !bits.length);
+    if (bits.length) info.textContent = bits.join(' · ');
+
+    const n = s.count ?? s.players?.length ?? 0;
+    const players = (s.players || []).map((p) =>
+      typeof p === 'string'
+        ? `<span class="game-player">${escapeHtml(p)}</span>`
+        : `<span class="game-player">${escapeHtml(p.name)}${p.ping != null ? ` <em>${p.ping}ms</em>` : ''}</span>`
+    ).join('');
+    box.innerHTML = `<strong>${n}${s.max != null ? ` / ${s.max}` : ''} online</strong>${players ? ` ${players}` : ''}`;
+  } catch (err) {
+    info.classList.add('hidden');
+    box.innerHTML = `<span class="game-players-off">⚠ ${escapeHtml(err.message)}</span>`;
+  }
+}
+
+function appendGameOutput(line) {
+  const out = el('gameConsoleOutput');
+  out.textContent += (out.textContent ? '\n' : '') + line;
+  out.scrollTop = out.scrollHeight;
+}
+
+function openGameConsole(service) {
+  gameConsoleServiceId = service.id;
+  gameConsoleKind = service.game?.kind || null;
+  const isMc = gameConsoleKind === 'minecraft';
+
+  el('gameConsoleTitle').textContent = `${service.name} — ${isMc ? 'console' : 'game server'}`;
+  el('gameConsoleOutput').textContent = '';
+  el('gameConsoleOutput').classList.toggle('hidden', !isMc);
+  el('gameConsoleForm').classList.toggle('hidden', !isMc);
+  el('gameConsoleError').classList.add('hidden');
+  el('gameServerInfo').classList.add('hidden');
+  el('gamePlayers').textContent = 'Loading…';
+  el('gameConsoleInput').value = '';
+
+  const txUrl = service.game?.txAdminUrl;
+  const link = el('gameTxAdminLink');
+  link.classList.toggle('hidden', !txUrl);
+  if (txUrl) link.href = txUrl;
+
+  if (isMc) {
+    const canRun = !!state.config.security?.serviceControl?.enabled;
+    el('gameConsoleInput').disabled = !canRun;
+    el('gameConsoleForm').querySelector('button').disabled = !canRun;
+    el('gameConsoleHint').textContent = canRun
+      ? 'Commands run over RCON on the server.'
+      : 'Turn on Service Control (Settings → Security) to run commands.';
+  } else {
+    el('gameConsoleHint').textContent = 'Read-only. Restart and console are in txAdmin.';
+  }
+
+  gameConsoleModal.classList.remove('hidden');
+  refreshGamePlayers();
+  clearInterval(gamePlayersPollTimer);
+  gamePlayersPollTimer = setInterval(refreshGamePlayers, GAME_PLAYERS_POLL_MS);
+}
+
+function closeGameConsole() {
+  gameConsoleModal.classList.add('hidden');
+  clearInterval(gamePlayersPollTimer);
+  gamePlayersPollTimer = null;
+  gameConsoleServiceId = null;
+}
+
+el('gameConsoleClose').addEventListener('click', closeGameConsole);
+gameConsoleModal.addEventListener('click', (e) => { if (e.target === gameConsoleModal) closeGameConsole(); });
+
+el('gameConsoleForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = el('gameConsoleInput');
+  const command = input.value.trim();
+  if (!command || !gameConsoleServiceId) return;
+  appendGameOutput(`> ${command}`);
+  input.value = '';
+  el('gameConsoleError').classList.add('hidden');
+  try {
+    const { output } = await api.gameServerCommand(gameConsoleServiceId, command);
+    appendGameOutput(output || '(no output)');
+  } catch (err) {
+    el('gameConsoleError').textContent = err.message;
+    el('gameConsoleError').classList.remove('hidden');
+  }
+  refreshGamePlayers();
+});

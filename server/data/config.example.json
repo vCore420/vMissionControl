@@ -2,7 +2,8 @@
   "settings": {
     "port": 5000,
     "healthCheckIntervalMs": 15000,
-    "healthCheckTimeoutMs": 3000
+    "healthCheckTimeoutMs": 3000,
+    "trustProxy": false
   },
   "sharedFolder": {
     "enabled": true,
@@ -77,6 +78,62 @@
     "webhookUrl": "",
     "format": "generic"
   },
+  "ollama": {
+    "baseUrl": "http://localhost:11434",
+    "model": "",
+    "systemPrompt": "",
+    "botName": "Ollama",
+    "botEmoji": "🦙",
+    "trigger": "@ollama",
+    "contextMessages": 30,
+    "keepAlive": "30m",
+    "numPredict": 512,
+    "requestTimeoutMs": 120000,
+    "active": false,
+    "tools": false,
+    "actions": false
+  },
+  "code": {
+    "enabled": false,
+    "workspacePath": "",
+    "defaultModel": "",
+    "defaultApprovalMode": "ask",
+    "maxSteps": 25,
+    "contextTokens": 16384,
+    "contextFileName": "AGENTS.md",
+    "memoryFileName": "AGENTS-memory.md",
+    "allowCommands": false,
+    "commandTimeoutMs": 60000,
+    "checks": [],
+    "checkTimeoutMs": 120000,
+    "keepAlive": "30m",
+    "numPredict": 0,
+    "requestTimeoutMs": 300000
+  },
+  "comfy": {
+    "enabled": false,
+    "baseUrl": "http://127.0.0.1:8188",
+    "workflow": "",
+    "mapping": {},
+    "model": "",
+    "defaultNegative": "",
+    "defaultWidth": 512,
+    "defaultHeight": 512,
+    "defaultSteps": 20,
+    "defaultCfg": 7,
+    "promptPrefix": "",
+    "promptSuffix": "",
+    "timeoutMs": 300000,
+    "ejectAfterMin": 10,
+    "maxPerTurn": 6,
+    "outputDir": ""
+  },
+  "snippets": [],
+  "widgets": [],
+  "jellyfin": {
+    "baseUrl": "",
+    "apiKey": ""
+  },
   "auth": {
     "enabled": false,
     "salt": "",
@@ -90,6 +147,10 @@
     },
     "serviceControl": {
       "enabled": false
+    },
+    "snippetRunner": {
+      "enabled": false,
+      "timeoutMs": 60000
     }
   }
 }

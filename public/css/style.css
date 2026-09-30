@@ -19,6 +19,22 @@
   --dot: rgba(232, 234, 240, 0.09);
   --font-mono: "Cascadia Code", "JetBrains Mono", "Fira Code", ui-monospace, "SFMono-Regular", Consolas, Menlo, monospace;
   font-family: var(--font-mono);
+
+  /* Card structure — split out from the hand-written values .service-card
+     used inline below, so a custom theme can override any one of these
+     independently (width, style, color, per side) without touching the
+     others. Presets never redeclare this block, so every preset keeps
+     today's exact look; only Custom writes inline overrides here. */
+  --card-border-width: 2px;
+  --card-border-style: solid;
+  --card-border-color: var(--accent);
+  --card-border-top: var(--card-border-width) var(--card-border-style) var(--card-border-color);
+  --card-border-right: var(--card-border-width) var(--card-border-style) var(--card-border-color);
+  --card-border-bottom: var(--card-border-width) var(--card-border-style) var(--card-border-color);
+  --card-border-left: var(--card-border-width) var(--card-border-style) var(--card-border-color);
+  --card-shadow: var(--shadow);
+  --card-shadow-hover: 0 10px 28px -6px var(--accent-dim), var(--shadow);
+  --card-gradient: none;
 }
 
 /* Themes — every color in the app is one of the tokens above, so a theme
@@ -757,10 +773,14 @@ option {
 
 .service-card {
   position: relative;
-  background: var(--bg-card);
-  border: 2px solid var(--accent);
+  background-color: var(--bg-card);
+  background-image: var(--card-gradient);
+  border-top: var(--card-border-top);
+  border-right: var(--card-border-right);
+  border-bottom: var(--card-border-bottom);
+  border-left: var(--card-border-left);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  box-shadow: var(--card-shadow);
   transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
   overflow: hidden;
   cursor: grab;
@@ -773,11 +793,11 @@ option {
 
 .service-card:hover {
   transform: translateY(-3px);
-  box-shadow: 0 10px 28px -6px var(--accent-dim), var(--shadow);
+  box-shadow: var(--card-shadow-hover);
 }
 
 .service-card.connection-highlight {
-  box-shadow: 0 0 0 3px var(--accent-dim), var(--shadow);
+  box-shadow: 0 0 0 3px var(--accent-dim), var(--card-shadow);
 }
 
 .service-card.dimmed {
@@ -816,7 +836,7 @@ option {
   background:
     radial-gradient(circle, var(--dot) 1px, transparent 1px) 0 0 / 22px 22px,
     var(--bg-panel);
-  border-bottom: 2px solid var(--accent);
+  border-bottom: var(--card-border-bottom);
 }
 
 .card-icon {
@@ -3764,6 +3784,86 @@ legend {
   background: none;
   cursor: pointer;
   flex-shrink: 0;
+}
+
+/* Structural controls (borders/shadow/gradient) added alongside the 8 color
+   fields above — same card, same hint-text/label sizing, but stacked in
+   labeled groups since these mix ranges, a select, and paired
+   checkbox+color controls rather than being one uniform grid of pickers. */
+.custom-style-fields {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.custom-style-group h4 {
+  margin: 0 0 10px;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.custom-style-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+
+.custom-style-row input[type="range"] {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.custom-style-row select {
+  flex: 1 1 auto;
+}
+
+.custom-style-value {
+  flex: 0 0 auto;
+  min-width: 42px;
+  text-align: right;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.custom-style-row-color {
+  justify-content: space-between;
+}
+
+.custom-style-row-color .checkbox-row {
+  flex: 1 1 auto;
+}
+
+.custom-style-row-color input[type="color"] {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.custom-style-row-color input[type="color"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.custom-style-sides {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.custom-style-gradient-fields {
+  margin-top: 10px;
 }
 
 /* Wallpaper picker (creative roadmap Phase 1) — a gallery of generated

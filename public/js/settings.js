@@ -62,6 +62,32 @@ const DEFAULT_CUSTOM_COLORS = {
   online: '#4ade80', offline: '#f87171', unmonitored: '#6b7280', checking: '#fbbf24',
 };
 
+// ---------- Custom structural style (borders, shadow, gradient) ----------
+// Separate from DEFAULT_CUSTOM_COLORS/mc:customColors on purpose — colors
+// and structure are independent axes a person may want to reset or export
+// separately, and it keeps this additive: existing saved custom themes have
+// no mc:customStyle yet, so loadCustomStyle() below falls back to these
+// defaults, which reproduce style.css's original hardcoded card look
+// exactly. borderColor/gradientFrom/gradientTo are '' (meaning "follow the
+// theme's accent/accent-dim") rather than a baked-in hex, so a custom
+// theme's structure still tracks its own color edits unless overridden.
+const DEFAULT_CUSTOM_STYLE = {
+  borderWidth: 2,
+  borderStyle: 'solid',
+  borderColor: '',
+  borderSides: { top: true, right: true, bottom: true, left: true },
+  shadowX: 0,
+  shadowY: 8,
+  shadowBlur: 24,
+  shadowSpread: 0,
+  shadowColor: '#000000',
+  shadowAlpha: 0.35,
+  gradientEnabled: false,
+  gradientAngle: 135,
+  gradientFrom: '',
+  gradientTo: '',
+};
+
 // The full token set a [data-theme] CSS block declares — used to clear
 // any leftover inline overrides when switching away from Custom, since an
 // inline style always beats a stylesheet rule regardless of which preset
@@ -70,6 +96,15 @@ const THEME_TOKEN_KEYS = [
   'bg', 'bg-panel', 'bg-elevated', 'bg-card', 'bg-card-hover', 'border',
   'text', 'text-dim', 'text-faint', 'accent', 'accent-dim',
   'online', 'offline', 'unmonitored', 'checking', 'dot',
+];
+
+// The structural counterpart to THEME_TOKEN_KEYS — style.css's :root
+// defaults for these mirror the classic card look, so clearing them on
+// switching away from Custom is enough; no per-preset values needed.
+const CARD_STYLE_TOKEN_KEYS = [
+  'card-border-width', 'card-border-style', 'card-border-color',
+  'card-border-top', 'card-border-right', 'card-border-bottom', 'card-border-left',
+  'card-shadow', 'card-shadow-hover', 'card-gradient',
 ];
 
 function hexToRgb(hex) {
@@ -122,6 +157,31 @@ function deriveCustomTokens(c) {
   };
 }
 
+// Takes colorTokens (the already-derived 16-token set, so this can reuse
+// accent/accent-dim rather than recomputing them) plus the raw style
+// object, and returns the 10 card-structure tokens. A blank side turns
+// that border off entirely ('none') rather than width-0, since some
+// border-styles (double, groove) render a hairline even at 0 width.
+function deriveCustomStyleTokens(style, colorTokens) {
+  const borderColor = style.borderColor || colorTokens.accent;
+  const sideValue = (on) => (on ? `${style.borderWidth}px ${style.borderStyle} ${borderColor}` : 'none');
+  const shadow = `${style.shadowX}px ${style.shadowY}px ${style.shadowBlur}px ${style.shadowSpread}px ${hexToRgba(style.shadowColor, style.shadowAlpha)}`;
+  const gradientFrom = style.gradientFrom || colorTokens.accent;
+  const gradientTo = style.gradientTo || colorTokens['accent-dim'];
+  return {
+    'card-border-width': `${style.borderWidth}px`,
+    'card-border-style': style.borderStyle,
+    'card-border-color': borderColor,
+    'card-border-top': sideValue(style.borderSides.top),
+    'card-border-right': sideValue(style.borderSides.right),
+    'card-border-bottom': sideValue(style.borderSides.bottom),
+    'card-border-left': sideValue(style.borderSides.left),
+    'card-shadow': shadow,
+    'card-shadow-hover': `0 10px 28px -6px ${colorTokens['accent-dim']}, ${shadow}`,
+    'card-gradient': style.gradientEnabled ? `linear-gradient(${style.gradientAngle}deg, ${gradientFrom}, ${gradientTo})` : 'none',
+  };
+}
+
 function applyCustomTokens(tokens) {
   for (const [key, value] of Object.entries(tokens)) {
     document.documentElement.style.setProperty(`--${key}`, value);
@@ -136,15 +196,51 @@ function loadCustomColors() {
   }
 }
 
-// Saves both the 8 raw picks (so the form can be repopulated next time
-// it's opened) and the fully-derived 16-token set (so the pre-paint
-// script in index.html/login.html never has to duplicate the color math
-// above — it only ever loops over already-computed values).
-function saveAndApplyCustomTheme(colors) {
-  const tokens = deriveCustomTokens(colors);
-  setLocal('mc:customColors', JSON.stringify(colors));
+// Same shape of fallback as loadCustomColors, plus a merge (rather than a
+// bare `||`) so a theme saved before borderSides existed still gets that
+// nested default filled in instead of losing the whole object.
+function loadCustomStyle() {
+  let saved;
+  try {
+    saved = JSON.parse(localStorage.getItem('mc:customStyle'));
+  } catch {
+    saved = null;
+  }
+  if (!saved) return { ...DEFAULT_CUSTOM_STYLE };
+  return {
+    ...DEFAULT_CUSTOM_STYLE,
+    ...saved,
+    borderSides: { ...DEFAULT_CUSTOM_STYLE.borderSides, ...(saved.borderSides || {}) },
+  };
+}
+
+// Merges the color and structural token sets and applies/saves them
+// together, so mc:customTokens (what the pre-paint script in
+// index.html/login.html loops over before first paint) always holds the
+// complete set — colors and structure never go out of sync there even
+// though they're edited, saved and loaded independently everywhere else.
+function applyFullCustomTheme(colors, style) {
+  const colorTokens = deriveCustomTokens(colors);
+  const styleTokens = deriveCustomStyleTokens(style, colorTokens);
+  const tokens = { ...colorTokens, ...styleTokens };
   setLocal('mc:customTokens', JSON.stringify(tokens));
   applyCustomTokens(tokens);
+}
+
+// Saves the 8 raw color picks (so the form can be repopulated next time
+// it's opened) and re-applies the full theme against whatever structural
+// style is currently saved.
+function saveAndApplyCustomTheme(colors) {
+  setLocal('mc:customColors', JSON.stringify(colors));
+  applyFullCustomTheme(colors, loadCustomStyle());
+}
+
+// The structural counterpart — saves the raw style object and re-applies
+// against whatever colors are currently saved. Used by the borders/
+// shadow/gradient controls (step 4).
+function saveAndApplyCustomStyle(style) {
+  setLocal('mc:customStyle', JSON.stringify(style));
+  applyFullCustomTheme(loadCustomColors(), style);
 }
 
 function renderCustomThemePanel() {
@@ -165,7 +261,188 @@ function renderCustomThemePanel() {
       const next = { ...loadCustomColors(), [input.dataset.colorKey]: input.value };
       saveAndApplyCustomTheme(next);
       renderThemeGrid(); // keeps the Custom swatch's own preview live
+      renderCustomStylePanel(); // border/gradient "match accent" swatches track it live too
     });
+  });
+  renderCustomStylePanel();
+}
+
+const BORDER_STYLES = ['solid', 'dashed', 'dotted', 'double', 'groove', 'ridge'];
+
+// A slider/color/select's value alone doesn't say how to fold it back into
+// the style object — a couple (border/gradient colors) are actually a
+// checkbox+color pair sharing one field ('' means "auto, follow accent"),
+// and the border sides are a nested object rather than a flat key. Kept as
+// one dispatcher, rather than a generic data-key loop like the color
+// fields use, so each case's own quirk stays visible at its call site.
+function updateCustomStyle(mutator) {
+  const next = mutator(loadCustomStyle());
+  saveAndApplyCustomStyle(next);
+  return next;
+}
+
+function bindStyleField(input) {
+  const key = input.dataset.styleKey;
+  const side = input.dataset.styleSide;
+
+  if (side) {
+    input.addEventListener('change', () => {
+      updateCustomStyle((s) => ({ ...s, borderSides: { ...s.borderSides, [side]: input.checked } }));
+    });
+    return;
+  }
+
+  // The three "auto" checkboxes: checked means the field stays '' (follow
+  // the theme's accent/accent-dim); unchecking hands control to the color
+  // input sitting right next to it, seeded with its current effective value.
+  if (key === 'borderColorAuto' || key === 'gradientFromAuto' || key === 'gradientToAuto') {
+    const target = { borderColorAuto: 'borderColor', gradientFromAuto: 'gradientFrom', gradientToAuto: 'gradientTo' }[key];
+    input.addEventListener('change', () => {
+      const colorInput = el('customStyleFields').querySelector(`[data-style-key="${target}"]`);
+      updateCustomStyle((s) => ({ ...s, [target]: input.checked ? '' : colorInput.value }));
+      renderCustomStylePanel();
+    });
+    return;
+  }
+
+  if (key === 'gradientEnabled') {
+    input.addEventListener('change', () => {
+      updateCustomStyle((s) => ({ ...s, gradientEnabled: input.checked }));
+      renderCustomStylePanel();
+    });
+    return;
+  }
+
+  if (key === 'borderStyle') {
+    input.addEventListener('change', () => {
+      updateCustomStyle((s) => ({ ...s, borderStyle: input.value }));
+    });
+    return;
+  }
+
+  if (key === 'borderColor' || key === 'shadowColor' || key === 'gradientFrom' || key === 'gradientTo') {
+    input.addEventListener('input', () => {
+      updateCustomStyle((s) => ({ ...s, [key]: input.value }));
+    });
+    return;
+  }
+
+  // Remaining fields are all numeric ranges (borderWidth, the four shadow
+  // offset/blur/spread values, shadowAlpha, gradientAngle). Updates the
+  // adjacent value label directly instead of re-rendering the panel on
+  // every 'input' tick, since replacing the slider's own DOM node mid-drag
+  // would drop the pointer capture and cut the drag short.
+  const valueEl = input.closest('.custom-style-row')?.querySelector('.custom-style-value');
+  input.addEventListener('input', () => {
+    const num = Number(input.value);
+    updateCustomStyle((s) => ({ ...s, [key]: num }));
+    if (valueEl) valueEl.textContent = key === 'shadowAlpha' ? `${Math.round(num * 100)}%` : key === 'gradientAngle' ? `${num}°` : `${num}px`;
+  });
+}
+
+function renderCustomStylePanel() {
+  const s = loadCustomStyle();
+  const side = (id, label) => `
+    <label class="checkbox-row">
+      <input type="checkbox" data-style-side="${id}" ${s.borderSides[id] ? 'checked' : ''} />
+      ${label}
+    </label>`;
+
+  el('customStyleFields').innerHTML = `
+    <div class="custom-style-group">
+      <h4>Border</h4>
+      <label class="custom-style-row">
+        Width
+        <input type="range" min="0" max="8" step="1" value="${s.borderWidth}" data-style-key="borderWidth" />
+        <span class="custom-style-value">${s.borderWidth}px</span>
+      </label>
+      <label class="custom-style-row">
+        Style
+        <select data-style-key="borderStyle">
+          ${BORDER_STYLES.map((b) => `<option value="${b}" ${s.borderStyle === b ? 'selected' : ''}>${b}</option>`).join('')}
+        </select>
+      </label>
+      <div class="custom-style-row custom-style-row-color">
+        <span class="checkbox-row">
+          <input type="checkbox" data-style-key="borderColorAuto" ${s.borderColor ? '' : 'checked'} />
+          Match accent color
+        </span>
+        <input type="color" data-style-key="borderColor" value="${s.borderColor || '#7c5cff'}" ${s.borderColor ? '' : 'disabled'} />
+      </div>
+      <div class="custom-style-sides">
+        ${side('top', 'Top')}${side('right', 'Right')}${side('bottom', 'Bottom')}${side('left', 'Left')}
+      </div>
+    </div>
+
+    <div class="custom-style-group">
+      <h4>Shadow</h4>
+      <label class="custom-style-row">
+        Offset X
+        <input type="range" min="-30" max="30" step="1" value="${s.shadowX}" data-style-key="shadowX" />
+        <span class="custom-style-value">${s.shadowX}px</span>
+      </label>
+      <label class="custom-style-row">
+        Offset Y
+        <input type="range" min="-30" max="30" step="1" value="${s.shadowY}" data-style-key="shadowY" />
+        <span class="custom-style-value">${s.shadowY}px</span>
+      </label>
+      <label class="custom-style-row">
+        Blur
+        <input type="range" min="0" max="60" step="1" value="${s.shadowBlur}" data-style-key="shadowBlur" />
+        <span class="custom-style-value">${s.shadowBlur}px</span>
+      </label>
+      <label class="custom-style-row">
+        Spread
+        <input type="range" min="-20" max="20" step="1" value="${s.shadowSpread}" data-style-key="shadowSpread" />
+        <span class="custom-style-value">${s.shadowSpread}px</span>
+      </label>
+      <label class="custom-style-row">
+        Opacity
+        <input type="range" min="0" max="1" step="0.05" value="${s.shadowAlpha}" data-style-key="shadowAlpha" />
+        <span class="custom-style-value">${Math.round(s.shadowAlpha * 100)}%</span>
+      </label>
+      <label class="custom-style-row custom-style-row-color">
+        Color
+        <input type="color" data-style-key="shadowColor" value="${s.shadowColor}" />
+      </label>
+    </div>
+
+    <div class="custom-style-group">
+      <h4>Gradient</h4>
+      <label class="checkbox-row">
+        <input type="checkbox" data-style-key="gradientEnabled" ${s.gradientEnabled ? 'checked' : ''} />
+        Enable card gradient
+      </label>
+      <div class="custom-style-gradient-fields ${s.gradientEnabled ? '' : 'hidden'}">
+        <label class="custom-style-row">
+          Angle
+          <input type="range" min="0" max="360" step="5" value="${s.gradientAngle}" data-style-key="gradientAngle" />
+          <span class="custom-style-value">${s.gradientAngle}°</span>
+        </label>
+        <div class="custom-style-row custom-style-row-color">
+          <span class="checkbox-row">
+            <input type="checkbox" data-style-key="gradientFromAuto" ${s.gradientFrom ? '' : 'checked'} />
+            From: match accent
+          </span>
+          <input type="color" data-style-key="gradientFrom" value="${s.gradientFrom || '#7c5cff'}" ${s.gradientFrom ? '' : 'disabled'} />
+        </div>
+        <div class="custom-style-row custom-style-row-color">
+          <span class="checkbox-row">
+            <input type="checkbox" data-style-key="gradientToAuto" ${s.gradientTo ? '' : 'checked'} />
+            To: match accent (dim)
+          </span>
+          <input type="color" data-style-key="gradientTo" value="${s.gradientTo || '#4d3ba3'}" ${s.gradientTo ? '' : 'disabled'} />
+        </div>
+      </div>
+    </div>
+
+    <button type="button" id="resetCustomStyleBtn" class="btn ghost">Reset borders/shadow/gradient to defaults</button>
+  `;
+
+  el('customStyleFields').querySelectorAll('[data-style-key], [data-style-side]').forEach(bindStyleField);
+  el('resetCustomStyleBtn').addEventListener('click', () => {
+    updateCustomStyle(() => ({ ...DEFAULT_CUSTOM_STYLE, borderSides: { ...DEFAULT_CUSTOM_STYLE.borderSides } }));
+    renderCustomStylePanel();
   });
 }
 
@@ -174,9 +451,9 @@ function applyTheme(themeId) {
   setLocal('mc:theme', themeId);
   state.theme = themeId;
   if (themeId === 'custom') {
-    saveAndApplyCustomTheme(loadCustomColors());
+    applyFullCustomTheme(loadCustomColors(), loadCustomStyle());
   } else {
-    for (const key of THEME_TOKEN_KEYS) document.documentElement.style.removeProperty(`--${key}`);
+    for (const key of [...THEME_TOKEN_KEYS, ...CARD_STYLE_TOKEN_KEYS]) document.documentElement.style.removeProperty(`--${key}`);
   }
   renderThemeGrid();
   renderCustomThemePanel();
